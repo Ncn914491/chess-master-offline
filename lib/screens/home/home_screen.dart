@@ -10,6 +10,8 @@ import 'package:chess_master/screens/game/game_screen.dart';
 import 'package:chess_master/screens/history/game_history_screen.dart';
 import 'package:chess_master/screens/puzzles/puzzle_menu_screen.dart';
 import 'package:chess_master/screens/analysis/analysis_screen.dart';
+import 'package:chess_master/screens/stats/statistics_screen.dart';
+import 'package:chess_master/screens/settings/settings_screen.dart';
 
 /// Home screen with main menu
 class HomeScreen extends ConsumerWidget {
@@ -157,7 +159,10 @@ class HomeScreen extends ConsumerWidget {
             label: 'Statistics',
             subtitle: 'View your progress',
             onTap: () {
-              // TODO: Navigate to statistics
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (context) => const StatisticsScreen()),
+              );
             },
           ),
           const SizedBox(height: 12),
@@ -166,7 +171,10 @@ class HomeScreen extends ConsumerWidget {
             label: 'Settings',
             subtitle: 'Customize your experience',
             onTap: () {
-              // TODO: Navigate to settings
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (context) => const SettingsScreen()),
+              );
             },
           ),
         ],
