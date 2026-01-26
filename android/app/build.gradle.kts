@@ -31,7 +31,7 @@ android {
 
     defaultConfig {
         applicationId = "com.karna.chessmaster"
-        minSdk = 21
+        minSdk = flutter.minSdkVersion
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName

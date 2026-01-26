@@ -5,15 +5,16 @@
 // gestures. You can also use WidgetTester to find child widgets in the widget
 // tree, read text, and verify that the values of widget properties are correct.
 
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:chess_master/main.dart';
 
 void main() {
-  testWidgets('App launches correctly', (WidgetTester tester) async {
+  testWidgets('App launches and displays bottom navigation bar', (WidgetTester tester) async {
     // Build our app and trigger a frame.
     await tester.pumpWidget(const ChessMasterApp());
 
-    // Verify that the app title is displayed
-    expect(find.text('ChessMaster Offline'), findsOneWidget);
+    // Verify that the BottomNavigationBar is present.
+    expect(find.byType(BottomNavigationBar), findsOneWidget);
   });
 }
