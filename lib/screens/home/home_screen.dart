@@ -8,43 +8,53 @@ import 'package:chess_master/providers/settings_provider.dart';
 import 'package:chess_master/providers/engine_provider.dart';
 import 'package:chess_master/screens/game/game_screen.dart';
 import 'package:chess_master/screens/history/game_history_screen.dart';
-import 'package:chess_master/screens/puzzles/puzzle_menu_screen.dart';
-import 'package:chess_master/screens/analysis/analysis_screen.dart';
-import 'package:chess_master/screens/stats/statistics_screen.dart';
-import 'package:chess_master/screens/settings/settings_screen.dart';
+import 'package:chess_master/core/utils/pgn_handler.dart';
 
-/// Home screen with main menu
-class HomeScreen extends ConsumerWidget {
+/// Home screen - main tab for starting games
+class HomeScreen extends ConsumerStatefulWidget {
   const HomeScreen({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<HomeScreen> createState() => _HomeScreenState();
+}
+
+class _HomeScreenState extends ConsumerState<HomeScreen> {
+  bool _isLoading = false;
+
+  @override
+  Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppTheme.backgroundDark,
       body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.all(24.0),
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(20),
           child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const SizedBox(height: 40),
-              // App logo and title
+              // Header
               _buildHeader(context),
-              const SizedBox(height: 48),
+              const SizedBox(height: 32),
 
-              // Main menu buttons
-              Expanded(
-                child: _buildMenuButtons(context, ref),
-              ),
-
-              // Quick start section
-              _buildQuickStart(context, ref),
+              // Play with Bot Section
+              _buildSectionTitle(context, '🤖 Play with Bot'),
+              const SizedBox(height: 16),
+              _buildBotOptionsCard(context),
               const SizedBox(height: 24),
 
-              // Version info
-              Text(
-                'Version ${AppConstants.appVersion}',
-                style: Theme.of(context).textTheme.bodySmall,
-              ),
+              // Play with Friend Section
+              _buildSectionTitle(context, '👥 Play with Friend'),
+              const SizedBox(height: 16),
+              _buildFriendModeCard(context),
+              const SizedBox(height: 24),
+
+              // Continue / Load Game Section
+              _buildSectionTitle(context, '📂 Continue Game'),
+              const SizedBox(height: 16),
+              _buildLoadGameCard(context),
+              const SizedBox(height: 32),
+
+              // Quick Start
+              _buildQuickStartSection(context),
             ],
           ),
         ),
@@ -53,141 +63,227 @@ class HomeScreen extends ConsumerWidget {
   }
 
   Widget _buildHeader(BuildContext context) {
-    return Column(
+    return Row(
       children: [
-        // Chess piece icon
         Container(
-          width: 80,
-          height: 80,
+          width: 56,
+          height: 56,
           decoration: BoxDecoration(
             gradient: const LinearGradient(
               colors: [AppTheme.primaryColor, AppTheme.primaryLight],
               begin: Alignment.topLeft,
               end: Alignment.bottomRight,
             ),
-            borderRadius: BorderRadius.circular(20),
+            borderRadius: BorderRadius.circular(16),
             boxShadow: [
               BoxShadow(
-                color: AppTheme.primaryColor.withValues(alpha: 0.4),
-                blurRadius: 20,
-                offset: const Offset(0, 8),
+                color: AppTheme.primaryColor.withOpacity(0.4),
+                blurRadius: 12,
+                offset: const Offset(0, 4),
               ),
             ],
           ),
           child: const Center(
             child: Text(
               '♔',
-              style: TextStyle(fontSize: 48, color: Colors.white),
+              style: TextStyle(fontSize: 32, color: Colors.white),
             ),
           ),
         ),
-        const SizedBox(height: 16),
-        Text(
-          AppConstants.appName,
-          style: Theme.of(context).textTheme.displaySmall?.copyWith(
-                fontWeight: FontWeight.bold,
-              ),
-        ),
-        const SizedBox(height: 4),
-        Text(
-          'Master the game of kings',
-          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                color: AppTheme.textSecondary,
-              ),
+        const SizedBox(width: 16),
+        Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Play Chess',
+              style: Theme.of(
+                context,
+              ).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold),
+            ),
+            Text(
+              'Choose your game mode',
+              style: Theme.of(
+                context,
+              ).textTheme.bodyMedium?.copyWith(color: AppTheme.textSecondary),
+            ),
+          ],
         ),
       ],
     );
   }
 
-  Widget _buildMenuButtons(BuildContext context, WidgetRef ref) {
-    return SingleChildScrollView(
+  Widget _buildSectionTitle(BuildContext context, String title) {
+    return Text(
+      title,
+      style: Theme.of(
+        context,
+      ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600),
+    );
+  }
+
+  Widget _buildBotOptionsCard(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        color: AppTheme.cardDark,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: AppTheme.surfaceDark),
+      ),
       child: Column(
         children: [
-          _MenuButton(
-            icon: Icons.play_arrow_rounded,
-            label: 'New Game',
-            subtitle: 'Play against the bot',
-            color: AppTheme.primaryColor,
-            onTap: () => _showNewGameDialog(context, ref),
+          // Standard Game - Level Selection
+          _buildOptionTile(
+            context,
+            icon: Icons.trending_up,
+            title: 'Standard Game',
+            subtitle: 'Play through levels 1-10',
+            color: Colors.green,
+            onTap: () => _showLevelSelectionSheet(context),
           ),
-          const SizedBox(height: 12),
-          _MenuButton(
-            icon: Icons.play_circle_outline,
-            label: 'Continue Game',
-            subtitle: 'Resume your last game',
-            onTap: () => _continueLastGame(context, ref),
-          ),
-          const SizedBox(height: 12),
-          _MenuButton(
-            icon: Icons.folder_outlined,
-            label: 'Load Game',
-            subtitle: 'View game history',
-            onTap: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(builder: (context) => const GameHistoryScreen()),
-              );
-            },
-          ),
-          const SizedBox(height: 12),
-          _MenuButton(
-            icon: Icons.extension_outlined,
-            label: 'Puzzles',
-            subtitle: 'Solve tactical puzzles',
-            onTap: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(builder: (context) => const PuzzleMenuScreen()),
-              );
-            },
-          ),
-          const SizedBox(height: 12),
-          _MenuButton(
-            icon: Icons.analytics_outlined,
-            label: 'Analysis',
-            subtitle: 'Analyze any position',
-            onTap: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(builder: (context) => const AnalysisScreen()),
-              );
-            },
-          ),
-          const SizedBox(height: 12),
-          _MenuButton(
-            icon: Icons.bar_chart_outlined,
-            label: 'Statistics',
-            subtitle: 'View your progress',
-            onTap: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(builder: (context) => const StatisticsScreen()),
-              );
-            },
-          ),
-          const SizedBox(height: 12),
-          _MenuButton(
-            icon: Icons.settings_outlined,
-            label: 'Settings',
-            subtitle: 'Customize your experience',
-            onTap: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(builder: (context) => const SettingsScreen()),
-              );
-            },
+          const Divider(height: 1, color: AppTheme.surfaceDark),
+          // Custom ELO
+          _buildOptionTile(
+            context,
+            icon: Icons.tune,
+            title: 'Choose ELO',
+            subtitle: 'Custom difficulty (800-2800)',
+            color: Colors.orange,
+            onTap: () => _showCustomEloDialog(context),
           ),
         ],
       ),
     );
   }
 
-  Widget _buildQuickStart(BuildContext context, WidgetRef ref) {
+  Widget _buildFriendModeCard(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: AppTheme.cardDark,
         borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: AppTheme.surfaceDark),
+      ),
+      child: _buildOptionTile(
+        context,
+        icon: Icons.people,
+        title: 'Local Multiplayer',
+        subtitle: '2 players on same device',
+        color: Colors.blue,
+        onTap: () => _showLocalMultiplayerSetup(context),
+      ),
+    );
+  }
+
+  Widget _buildLoadGameCard(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        color: AppTheme.cardDark,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: AppTheme.surfaceDark),
+      ),
+      child: Column(
+        children: [
+          // Resume Last Game
+          _buildOptionTile(
+            context,
+            icon: Icons.play_circle_outline,
+            title: 'Resume Last Game',
+            subtitle: 'Continue where you left off',
+            color: Colors.purple,
+            onTap: () => _continueLastGame(context),
+          ),
+          const Divider(height: 1, color: AppTheme.surfaceDark),
+          // Saved Games
+          _buildOptionTile(
+            context,
+            icon: Icons.folder_outlined,
+            title: 'Saved Games',
+            subtitle: 'Load from game history',
+            color: Colors.teal,
+            onTap: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => const GameHistoryScreen(),
+                ),
+              );
+            },
+          ),
+          const Divider(height: 1, color: AppTheme.surfaceDark),
+          // Load from PGN
+          _buildOptionTile(
+            context,
+            icon: Icons.upload_file,
+            title: 'Load from PGN',
+            subtitle: 'Import game or position',
+            color: Colors.amber,
+            onTap: () => _showLoadPGNDialog(context),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildOptionTile(
+    BuildContext context, {
+    required IconData icon,
+    required String title,
+    required String subtitle,
+    required Color color,
+    required VoidCallback onTap,
+  }) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(16),
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Row(
+            children: [
+              Container(
+                width: 48,
+                height: 48,
+                decoration: BoxDecoration(
+                  color: color.withOpacity(0.15),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Icon(icon, color: color, size: 24),
+              ),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(title, style: Theme.of(context).textTheme.titleMedium),
+                    const SizedBox(height: 2),
+                    Text(
+                      subtitle,
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: AppTheme.textSecondary,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const Icon(Icons.chevron_right, color: AppTheme.textHint),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildQuickStartSection(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: [
+            AppTheme.primaryColor.withOpacity(0.1),
+            AppTheme.primaryLight.withOpacity(0.1),
+          ],
+        ),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: AppTheme.primaryColor.withOpacity(0.3)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -202,30 +298,33 @@ class HomeScreen extends ConsumerWidget {
               ),
             ],
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: 16),
           Row(
             children: [
               Expanded(
                 child: _QuickStartButton(
                   label: 'Easy',
-                  elo: 1200,
-                  onTap: () => _startQuickGame(context, ref, 3),
+                  sublabel: 'Level 3',
+                  color: Colors.green,
+                  onTap: () => _startQuickGame(3),
                 ),
               ),
-              const SizedBox(width: 8),
+              const SizedBox(width: 12),
               Expanded(
                 child: _QuickStartButton(
                   label: 'Medium',
-                  elo: 1600,
-                  onTap: () => _startQuickGame(context, ref, 5),
+                  sublabel: 'Level 5',
+                  color: Colors.orange,
+                  onTap: () => _startQuickGame(5),
                 ),
               ),
-              const SizedBox(width: 8),
+              const SizedBox(width: 12),
               Expanded(
                 child: _QuickStartButton(
                   label: 'Hard',
-                  elo: 2000,
-                  onTap: () => _startQuickGame(context, ref, 7),
+                  sublabel: 'Level 7',
+                  color: Colors.red,
+                  onTap: () => _startQuickGame(7),
                 ),
               ),
             ],
@@ -235,36 +334,223 @@ class HomeScreen extends ConsumerWidget {
     );
   }
 
-  void _startQuickGame(BuildContext context, WidgetRef ref, int difficultyLevel) async {
-    final difficulty = AppConstants.difficultyLevels[difficultyLevel - 1];
+  // ========== Actions ==========
 
-    // Initialize and reset engine
-    final engineNotifier = ref.read(engineProvider.notifier);
-    await engineNotifier.initialize();
-    engineNotifier.resetForNewGame();
-
-    ref.read(gameProvider.notifier).startNewGame(
-          playerColor: PlayerColor.white,
-          difficulty: difficulty,
-          timeControl: AppConstants.timeControls[0], // No timer
-        );
-
-    Navigator.push(
-      context,
-      MaterialPageRoute(builder: (context) => const GameScreen()),
+  void _showLevelSelectionSheet(BuildContext context) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder:
+          (context) => _LevelSelectionSheet(
+            onLevelSelected: (level) {
+              Navigator.pop(context);
+              _showGameSetupSheet(context, level);
+            },
+          ),
     );
   }
 
-  Future<void> _continueLastGame(BuildContext context, WidgetRef ref) async {
+  void _showGameSetupSheet(BuildContext context, int level) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder:
+          (context) => _GameSetupSheet(
+            difficultyLevel: level,
+            onStartGame: (playerColor, timeControl) async {
+              Navigator.pop(context);
+              await _startBotGame(level, playerColor, timeControl);
+            },
+          ),
+    );
+  }
+
+  void _showCustomEloDialog(BuildContext context) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder:
+          (context) => _CustomEloSheet(
+            onStartGame: (elo, playerColor, timeControl) async {
+              Navigator.pop(context);
+              // Find closest difficulty level
+              final level =
+                  AppConstants.difficultyLevels
+                      .indexWhere((d) => d.elo >= elo)
+                      .clamp(0, 9) +
+                  1;
+              await _startBotGame(level, playerColor, timeControl);
+            },
+          ),
+    );
+  }
+
+  void _showLocalMultiplayerSetup(BuildContext context) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder:
+          (context) => _LocalMultiplayerSheet(
+            onStartGame: (timeControl, allowTakeback, autoFlip) async {
+              Navigator.pop(context);
+              await _startLocalGame(timeControl, allowTakeback, autoFlip);
+            },
+          ),
+    );
+  }
+
+  void _showLoadPGNDialog(BuildContext context) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder:
+          (context) => _LoadPGNSheet(
+            onLoad: (pgn) {
+              Navigator.pop(context);
+              final gameState = PGNHandler.parsePgn(pgn);
+              if (gameState != null) {
+                ref.read(gameProvider.notifier).state = gameState;
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (context) => const GameScreen()),
+                );
+              } else {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Invalid PGN!')),
+                );
+              }
+            },
+          ),
+    );
+  }
+
+  Future<void> _startQuickGame(int level) async {
+    final difficulty = AppConstants.difficultyLevels[level - 1];
+    await _startBotGame(level, PlayerColor.white, AppConstants.timeControls[0]);
+  }
+
+  Future<void> _startBotGame(
+    int level,
+    PlayerColor playerColor,
+    TimeControl timeControl,
+  ) async {
+    setState(() => _isLoading = true);
+
+    try {
+      final difficulty = AppConstants.difficultyLevels[level - 1];
+
+      // Initialize engine with timeout to prevent hanging
+      final engineNotifier = ref.read(engineProvider.notifier);
+      try {
+        await engineNotifier.initialize().timeout(const Duration(seconds: 5));
+      } catch (e) {
+        // Engine initialization failed - show warning but don't start bot game
+        debugPrint('Engine init warning: $e');
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text(
+                'Engine initialization failed. You can still play local multiplayer games.',
+              ),
+              backgroundColor: Colors.orange,
+            ),
+          );
+        }
+        return; // Don't start bot game if engine failed
+      }
+      engineNotifier.resetForNewGame();
+
+      // Resolve random color
+      PlayerColor actualColor = playerColor;
+      if (playerColor == PlayerColor.random) {
+        actualColor =
+            DateTime.now().millisecond % 2 == 0
+                ? PlayerColor.white
+                : PlayerColor.black;
+      }
+
+      // Start game
+      ref
+          .read(gameProvider.notifier)
+          .startNewGame(
+            playerColor: actualColor,
+            difficulty: difficulty,
+            timeControl: timeControl,
+            gameMode: GameMode.bot,
+            useTimer: timeControl.hasTimer,
+          );
+
+      if (mounted) {
+        Navigator.push(
+          context,
+          MaterialPageRoute(builder: (context) => const GameScreen()),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to start game: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
+    }
+  }
+
+  Future<void> _startLocalGame(
+    TimeControl timeControl,
+    bool allowTakeback,
+    bool autoFlip,
+  ) async {
+    // Start local multiplayer game (no engine needed)
+
+    // Update auto flip setting
+    final settings = ref.read(settingsProvider);
+    if (settings.autoFlipBoard != autoFlip) {
+      ref.read(settingsProvider.notifier).toggleAutoFlipBoard();
+    }
+
+    ref
+        .read(gameProvider.notifier)
+        .startNewGame(
+          playerColor:
+              PlayerColor.white, // In local mode, both players use same device
+          difficulty:
+              AppConstants.difficultyLevels[4], // Not used in local mode
+          timeControl: timeControl,
+          gameMode: GameMode.localMultiplayer,
+          allowTakeback: allowTakeback,
+          useTimer: timeControl.hasTimer,
+        );
+
+    if (mounted) {
+      Navigator.push(
+        context,
+        MaterialPageRoute(builder: (context) => const GameScreen()),
+      );
+    }
+  }
+
+  Future<void> _continueLastGame(BuildContext context) async {
     try {
       final dbService = ref.read(databaseServiceProvider);
       final lastGame = await dbService.getLastUnfinishedGame();
 
       if (lastGame == null) {
         if (context.mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('No saved game found')),
-          );
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(const SnackBar(content: Text('No saved game found')));
         }
         return;
       }
@@ -276,7 +562,8 @@ class HomeScreen extends ConsumerWidget {
 
       // Load game settings
       final playerColorStr = lastGame['player_color'] as String? ?? 'white';
-      final playerColor = playerColorStr == 'white' ? PlayerColor.white : PlayerColor.black;
+      final playerColor =
+          playerColorStr == 'white' ? PlayerColor.white : PlayerColor.black;
 
       final botElo = lastGame['bot_elo'] as int? ?? 1200;
       final difficultyIndex = AppConstants.difficultyLevels
@@ -292,11 +579,14 @@ class HomeScreen extends ConsumerWidget {
 
       final fenCurrent = lastGame['fen_current'] as String?;
 
-      ref.read(gameProvider.notifier).startNewGame(
+      ref
+          .read(gameProvider.notifier)
+          .startNewGame(
             playerColor: playerColor,
             difficulty: difficulty,
             timeControl: timeControl,
             startingFen: fenCurrent,
+            gameMode: GameMode.bot,
           );
 
       if (context.mounted) {
@@ -307,123 +597,58 @@ class HomeScreen extends ConsumerWidget {
       }
     } catch (e) {
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error loading game: $e')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Error loading game: $e')));
       }
     }
   }
-
-  void _showNewGameDialog(BuildContext context, WidgetRef ref) {
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (context) => _NewGameSheet(ref: ref),
-    );
-  }
 }
 
-/// Menu button widget
-class _MenuButton extends StatelessWidget {
-  final IconData icon;
-  final String label;
-  final String subtitle;
-  final Color? color;
-  final VoidCallback onTap;
+// ========== Quick Start Button ==========
 
-  const _MenuButton({
-    required this.icon,
-    required this.label,
-    required this.subtitle,
-    this.color,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Material(
-      color: AppTheme.cardDark,
-      borderRadius: BorderRadius.circular(16),
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(16),
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Row(
-            children: [
-              Container(
-                width: 48,
-                height: 48,
-                decoration: BoxDecoration(
-                  color: (color ?? AppTheme.surfaceDark).withValues(alpha: 0.2),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Icon(
-                  icon,
-                  color: color ?? AppTheme.textPrimary,
-                  size: 24,
-                ),
-              ),
-              const SizedBox(width: 16),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      label,
-                      style: Theme.of(context).textTheme.titleMedium,
-                    ),
-                    Text(
-                      subtitle,
-                      style: Theme.of(context).textTheme.bodySmall,
-                    ),
-                  ],
-                ),
-              ),
-              const Icon(
-                Icons.chevron_right,
-                color: AppTheme.textHint,
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-/// Quick start button
 class _QuickStartButton extends StatelessWidget {
   final String label;
-  final int elo;
+  final String sublabel;
+  final Color color;
   final VoidCallback onTap;
 
   const _QuickStartButton({
     required this.label,
-    required this.elo,
+    required this.sublabel,
+    required this.color,
     required this.onTap,
   });
 
   @override
   Widget build(BuildContext context) {
     return Material(
-      color: AppTheme.surfaceDark,
+      color: color.withOpacity(0.15),
       borderRadius: BorderRadius.circular(12),
       child: InkWell(
         onTap: onTap,
         borderRadius: BorderRadius.circular(12),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 12),
+        child: Container(
+          padding: const EdgeInsets.symmetric(vertical: 16),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: color.withOpacity(0.3)),
+          ),
           child: Column(
             children: [
               Text(
                 label,
-                style: Theme.of(context).textTheme.titleMedium,
+                style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                  color: color,
+                  fontWeight: FontWeight.bold,
+                ),
               ),
+              const SizedBox(height: 2),
               Text(
-                '$elo ELO',
-                style: Theme.of(context).textTheme.bodySmall,
+                sublabel,
+                style: Theme.of(
+                  context,
+                ).textTheme.bodySmall?.copyWith(color: AppTheme.textSecondary),
               ),
             ],
           ),
@@ -433,28 +658,12 @@ class _QuickStartButton extends StatelessWidget {
   }
 }
 
-/// New game configuration sheet
-class _NewGameSheet extends StatefulWidget {
-  final WidgetRef ref;
+// ========== Level Selection Sheet ==========
 
-  const _NewGameSheet({required this.ref});
+class _LevelSelectionSheet extends StatelessWidget {
+  final Function(int level) onLevelSelected;
 
-  @override
-  State<_NewGameSheet> createState() => _NewGameSheetState();
-}
-
-class _NewGameSheetState extends State<_NewGameSheet> {
-  PlayerColor _selectedColor = PlayerColor.white;
-  int _selectedDifficulty = 5;
-  int _selectedTimeControl = 0;
-
-  @override
-  void initState() {
-    super.initState();
-    final settings = widget.ref.read(settingsProvider);
-    _selectedDifficulty = settings.lastDifficultyLevel;
-    _selectedTimeControl = settings.lastTimeControlIndex;
-  }
+  const _LevelSelectionSheet({required this.onLevelSelected});
 
   @override
   Widget build(BuildContext context) {
@@ -466,70 +675,195 @@ class _NewGameSheetState extends State<_NewGameSheet> {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          // Handle
-          Container(
-            margin: const EdgeInsets.only(top: 12),
-            width: 40,
-            height: 4,
-            decoration: BoxDecoration(
-              color: Colors.grey[600],
-              borderRadius: BorderRadius.circular(2),
-            ),
-          ),
+          _buildHandle(),
           Padding(
-            padding: const EdgeInsets.all(24),
+            padding: const EdgeInsets.all(20),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  'New Game',
-                  style: Theme.of(context).textTheme.displaySmall,
+                  'Select Level',
+                  style: Theme.of(context).textTheme.headlineSmall,
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  'Choose your difficulty level',
+                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    color: AppTheme.textSecondary,
+                  ),
+                ),
+                const SizedBox(height: 20),
+                // Level grid
+                GridView.builder(
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                    crossAxisCount: 5,
+                    childAspectRatio: 1,
+                    crossAxisSpacing: 12,
+                    mainAxisSpacing: 12,
+                  ),
+                  itemCount: 10,
+                  itemBuilder: (context, index) {
+                    final level = index + 1;
+                    final difficulty = AppConstants.difficultyLevels[index];
+                    return _LevelButton(
+                      level: level,
+                      elo: difficulty.elo,
+                      onTap: () => onLevelSelected(level),
+                    );
+                  },
+                ),
+                const SizedBox(height: 20),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildHandle() {
+    return Container(
+      margin: const EdgeInsets.only(top: 12),
+      width: 40,
+      height: 4,
+      decoration: BoxDecoration(
+        color: Colors.grey[600],
+        borderRadius: BorderRadius.circular(2),
+      ),
+    );
+  }
+}
+
+class _LevelButton extends StatelessWidget {
+  final int level;
+  final int elo;
+  final VoidCallback onTap;
+
+  const _LevelButton({
+    required this.level,
+    required this.elo,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final color = _getLevelColor(level);
+
+    return Material(
+      color: color.withOpacity(0.15),
+      borderRadius: BorderRadius.circular(12),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(12),
+        child: Container(
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: color.withOpacity(0.5)),
+          ),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Text(
+                '$level',
+                style: TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.bold,
+                  color: color,
+                ),
+              ),
+              Text(
+                '$elo',
+                style: TextStyle(fontSize: 10, color: AppTheme.textSecondary),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Color _getLevelColor(int level) {
+    if (level <= 3) return Colors.green;
+    if (level <= 5) return Colors.orange;
+    if (level <= 7) return Colors.deepOrange;
+    return Colors.red;
+  }
+}
+
+// ========== Game Setup Sheet ==========
+
+class _GameSetupSheet extends StatefulWidget {
+  final int difficultyLevel;
+  final Function(PlayerColor, TimeControl) onStartGame;
+
+  const _GameSetupSheet({
+    required this.difficultyLevel,
+    required this.onStartGame,
+  });
+
+  @override
+  State<_GameSetupSheet> createState() => _GameSetupSheetState();
+}
+
+class _GameSetupSheetState extends State<_GameSetupSheet> {
+  PlayerColor _selectedColor = PlayerColor.white;
+  int _selectedTimeControlIndex = 0;
+
+  @override
+  Widget build(BuildContext context) {
+    final difficulty =
+        AppConstants.difficultyLevels[widget.difficultyLevel - 1];
+
+    return Container(
+      decoration: const BoxDecoration(
+        color: AppTheme.surfaceDark,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _buildHandle(),
+          Padding(
+            padding: const EdgeInsets.all(20),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Level ${widget.difficultyLevel} - ${difficulty.name}',
+                  style: Theme.of(context).textTheme.headlineSmall,
+                ),
+                Text(
+                  '${difficulty.elo} ELO',
+                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    color: AppTheme.textSecondary,
+                  ),
                 ),
                 const SizedBox(height: 24),
 
                 // Color selection
-                Text(
-                  'Play as',
-                  style: Theme.of(context).textTheme.titleMedium,
-                ),
+                Text('Play as', style: Theme.of(context).textTheme.titleMedium),
                 const SizedBox(height: 12),
                 Row(
-                  children: PlayerColor.values.map((color) {
-                    final isSelected = _selectedColor == color;
-                    return Expanded(
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 4),
-                        child: _ColorOption(
-                          color: color,
-                          isSelected: isSelected,
-                          onTap: () => setState(() => _selectedColor = color),
-                        ),
-                      ),
-                    );
-                  }).toList(),
+                  children:
+                      PlayerColor.values.map((color) {
+                        return Expanded(
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 4),
+                            child: _ColorChip(
+                              color: color,
+                              isSelected: _selectedColor == color,
+                              onTap:
+                                  () => setState(() => _selectedColor = color),
+                            ),
+                          ),
+                        );
+                      }).toList(),
                 ),
                 const SizedBox(height: 24),
 
-                // Difficulty selection
-                Text(
-                  'Difficulty: ${AppConstants.difficultyLevels[_selectedDifficulty - 1].name} '
-                  '(${AppConstants.difficultyLevels[_selectedDifficulty - 1].elo} ELO)',
-                  style: Theme.of(context).textTheme.titleMedium,
-                ),
-                const SizedBox(height: 12),
-                Slider(
-                  value: _selectedDifficulty.toDouble(),
-                  min: 1,
-                  max: 10,
-                  divisions: 9,
-                  label: AppConstants.difficultyLevels[_selectedDifficulty - 1].name,
-                  onChanged: (value) {
-                    setState(() => _selectedDifficulty = value.round());
-                  },
-                ),
-                const SizedBox(height: 24),
-
-                // Time control selection
+                // Time control
                 Text(
                   'Time Control',
                   style: Theme.of(context).textTheme.titleMedium,
@@ -538,20 +872,18 @@ class _NewGameSheetState extends State<_NewGameSheet> {
                 Wrap(
                   spacing: 8,
                   runSpacing: 8,
-                  children: List.generate(
-                    AppConstants.timeControls.length,
-                    (index) {
-                      final tc = AppConstants.timeControls[index];
-                      final isSelected = _selectedTimeControl == index;
-                      return ChoiceChip(
-                        label: Text(tc.name),
-                        selected: isSelected,
-                        onSelected: (_) {
-                          setState(() => _selectedTimeControl = index);
-                        },
-                      );
-                    },
-                  ),
+                  children: List.generate(AppConstants.timeControls.length, (
+                    index,
+                  ) {
+                    final tc = AppConstants.timeControls[index];
+                    return ChoiceChip(
+                      label: Text(tc.name),
+                      selected: _selectedTimeControlIndex == index,
+                      onSelected:
+                          (_) =>
+                              setState(() => _selectedTimeControlIndex = index),
+                    );
+                  }),
                 ),
                 const SizedBox(height: 32),
 
@@ -560,7 +892,12 @@ class _NewGameSheetState extends State<_NewGameSheet> {
                   width: double.infinity,
                   height: 56,
                   child: ElevatedButton(
-                    onPressed: _startGame,
+                    onPressed: () {
+                      widget.onStartGame(
+                        _selectedColor,
+                        AppConstants.timeControls[_selectedTimeControlIndex],
+                      );
+                    },
                     child: const Text('Start Game'),
                   ),
                 ),
@@ -573,41 +910,25 @@ class _NewGameSheetState extends State<_NewGameSheet> {
     );
   }
 
-  void _startGame() async {
-    final difficulty = AppConstants.difficultyLevels[_selectedDifficulty - 1];
-    final timeControl = AppConstants.timeControls[_selectedTimeControl];
-
-    // Save preferences
-    widget.ref.read(settingsProvider.notifier).setLastDifficulty(_selectedDifficulty);
-    widget.ref.read(settingsProvider.notifier).setLastTimeControl(_selectedTimeControl);
-
-    // Initialize and reset engine
-    final engineNotifier = widget.ref.read(engineProvider.notifier);
-    await engineNotifier.initialize();
-    engineNotifier.resetForNewGame();
-
-    // Start game
-    widget.ref.read(gameProvider.notifier).startNewGame(
-          playerColor: _selectedColor,
-          difficulty: difficulty,
-          timeControl: timeControl,
-        );
-
-    Navigator.pop(context);
-    Navigator.push(
-      context,
-      MaterialPageRoute(builder: (context) => const GameScreen()),
+  Widget _buildHandle() {
+    return Container(
+      margin: const EdgeInsets.only(top: 12),
+      width: 40,
+      height: 4,
+      decoration: BoxDecoration(
+        color: Colors.grey[600],
+        borderRadius: BorderRadius.circular(2),
+      ),
     );
   }
 }
 
-/// Color selection option
-class _ColorOption extends StatelessWidget {
+class _ColorChip extends StatelessWidget {
   final PlayerColor color;
   final bool isSelected;
   final VoidCallback onTap;
 
-  const _ColorOption({
+  const _ColorChip({
     required this.color,
     required this.isSelected,
     required this.onTap,
@@ -622,16 +943,16 @@ class _ColorOption extends StatelessWidget {
         onTap: onTap,
         borderRadius: BorderRadius.circular(12),
         child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 16),
+          padding: const EdgeInsets.symmetric(vertical: 12),
           child: Column(
             children: [
               Text(
                 color == PlayerColor.white
                     ? '♔'
                     : color == PlayerColor.black
-                        ? '♚'
-                        : '🎲',
-                style: const TextStyle(fontSize: 32),
+                    ? '♚'
+                    : '🎲',
+                style: const TextStyle(fontSize: 24),
               ),
               const SizedBox(height: 4),
               Text(
@@ -639,11 +960,386 @@ class _ColorOption extends StatelessWidget {
                 style: TextStyle(
                   color: isSelected ? Colors.white : AppTheme.textPrimary,
                   fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                  fontSize: 12,
                 ),
               ),
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+// ========== Custom ELO Sheet ==========
+
+class _CustomEloSheet extends StatefulWidget {
+  final Function(int elo, PlayerColor, TimeControl) onStartGame;
+
+  const _CustomEloSheet({required this.onStartGame});
+
+  @override
+  State<_CustomEloSheet> createState() => _CustomEloSheetState();
+}
+
+class _CustomEloSheetState extends State<_CustomEloSheet> {
+  double _selectedElo = 1200;
+  PlayerColor _selectedColor = PlayerColor.white;
+  int _selectedTimeControlIndex = 0;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: const BoxDecoration(
+        color: AppTheme.surfaceDark,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _buildHandle(),
+          Padding(
+            padding: const EdgeInsets.all(20),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Choose ELO',
+                  style: Theme.of(context).textTheme.headlineSmall,
+                ),
+                const SizedBox(height: 24),
+
+                // ELO Slider
+                Text(
+                  'Bot Strength: ${_selectedElo.round()} ELO',
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
+                Slider(
+                  value: _selectedElo,
+                  min: 800,
+                  max: 2800,
+                  divisions: 20,
+                  label: '${_selectedElo.round()}',
+                  onChanged: (value) => setState(() => _selectedElo = value),
+                ),
+                const SizedBox(height: 24),
+
+                // Color selection
+                Text('Play as', style: Theme.of(context).textTheme.titleMedium),
+                const SizedBox(height: 12),
+                Row(
+                  children:
+                      PlayerColor.values.map((color) {
+                        return Expanded(
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 4),
+                            child: _ColorChip(
+                              color: color,
+                              isSelected: _selectedColor == color,
+                              onTap:
+                                  () => setState(() => _selectedColor = color),
+                            ),
+                          ),
+                        );
+                      }).toList(),
+                ),
+                const SizedBox(height: 24),
+
+                // Time control
+                Text(
+                  'Time Control',
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
+                const SizedBox(height: 12),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: List.generate(AppConstants.timeControls.length, (
+                    index,
+                  ) {
+                    final tc = AppConstants.timeControls[index];
+                    return ChoiceChip(
+                      label: Text(tc.name),
+                      selected: _selectedTimeControlIndex == index,
+                      onSelected:
+                          (_) =>
+                              setState(() => _selectedTimeControlIndex = index),
+                    );
+                  }),
+                ),
+                const SizedBox(height: 32),
+
+                // Start button
+                SizedBox(
+                  width: double.infinity,
+                  height: 56,
+                  child: ElevatedButton(
+                    onPressed: () {
+                      widget.onStartGame(
+                        _selectedElo.round(),
+                        _selectedColor,
+                        AppConstants.timeControls[_selectedTimeControlIndex],
+                      );
+                    },
+                    child: const Text('Start Game'),
+                  ),
+                ),
+                const SizedBox(height: 16),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildHandle() {
+    return Container(
+      margin: const EdgeInsets.only(top: 12),
+      width: 40,
+      height: 4,
+      decoration: BoxDecoration(
+        color: Colors.grey[600],
+        borderRadius: BorderRadius.circular(2),
+      ),
+    );
+  }
+}
+
+// ========== Local Multiplayer Sheet ==========
+
+class _LocalMultiplayerSheet extends ConsumerStatefulWidget {
+  final Function(TimeControl, bool, bool) onStartGame;
+
+  const _LocalMultiplayerSheet({required this.onStartGame});
+
+  @override
+  ConsumerState<_LocalMultiplayerSheet> createState() =>
+      _LocalMultiplayerSheetState();
+}
+
+class _LocalMultiplayerSheetState
+    extends ConsumerState<_LocalMultiplayerSheet> {
+  bool _useTimer = false;
+  int _selectedTimeControlIndex = 7; // 10+0 default
+  bool _allowTakeback = true;
+  late bool _autoFlip;
+
+  @override
+  void initState() {
+    super.initState();
+    _autoFlip = ref.read(settingsProvider).autoFlipBoard;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: const BoxDecoration(
+        color: AppTheme.surfaceDark,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _buildHandle(),
+          Padding(
+            padding: const EdgeInsets.all(20),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Local Multiplayer',
+                  style: Theme.of(context).textTheme.headlineSmall,
+                ),
+                Text(
+                  '2 players on same device',
+                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    color: AppTheme.textSecondary,
+                  ),
+                ),
+                const SizedBox(height: 24),
+
+                // Timer toggle
+                SwitchListTile(
+                  title: const Text('Use Timer'),
+                  subtitle: const Text('Add time control to the game'),
+                  value: _useTimer,
+                  onChanged: (value) => setState(() => _useTimer = value),
+                  contentPadding: EdgeInsets.zero,
+                ),
+
+                if (_useTimer) ...[
+                  const SizedBox(height: 12),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: List.generate(
+                      AppConstants.timeControls.length -
+                          1, // Exclude "No Timer"
+                      (index) {
+                        final tc = AppConstants.timeControls[index + 1];
+                        return ChoiceChip(
+                          label: Text(tc.name),
+                          selected: _selectedTimeControlIndex == index + 1,
+                          onSelected:
+                              (_) => setState(
+                                () => _selectedTimeControlIndex = index + 1,
+                              ),
+                        );
+                      },
+                    ),
+                  ),
+                ],
+                const SizedBox(height: 16),
+
+                // Takeback toggle
+                SwitchListTile(
+                  title: const Text('Allow Takeback'),
+                  subtitle: const Text('Players can undo moves'),
+                  value: _allowTakeback,
+                  onChanged: (value) => setState(() => _allowTakeback = value),
+                  contentPadding: EdgeInsets.zero,
+                ),
+                const SizedBox(height: 24),
+
+                // Auto Flip toggle
+                SwitchListTile(
+                  title: const Text('Auto Flip Board'),
+                  subtitle: const Text('Flip board after each move'),
+                  value: _autoFlip,
+                  onChanged: (value) => setState(() => _autoFlip = value),
+                  contentPadding: EdgeInsets.zero,
+                ),
+                const SizedBox(height: 24),
+
+                // Start button
+                SizedBox(
+                  width: double.infinity,
+                  height: 56,
+                  child: ElevatedButton(
+                    onPressed: () {
+                      final timeControl =
+                          _useTimer
+                              ? AppConstants
+                                  .timeControls[_selectedTimeControlIndex]
+                              : AppConstants.timeControls[0]; // No Timer
+                      widget.onStartGame(
+                        timeControl,
+                        _allowTakeback,
+                        _autoFlip,
+                      );
+                    },
+                    child: const Text('Start Game'),
+                  ),
+                ),
+                const SizedBox(height: 16),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildHandle() {
+    return Container(
+      margin: const EdgeInsets.only(top: 12),
+      width: 40,
+      height: 4,
+      decoration: BoxDecoration(
+        color: Colors.grey[600],
+        borderRadius: BorderRadius.circular(2),
+      ),
+    );
+  }
+}
+
+// ========== Load PGN Sheet ==========
+
+class _LoadPGNSheet extends StatefulWidget {
+  final Function(String) onLoad;
+
+  const _LoadPGNSheet({required this.onLoad});
+
+  @override
+  State<_LoadPGNSheet> createState() => _LoadPGNSheetState();
+}
+
+class _LoadPGNSheetState extends State<_LoadPGNSheet> {
+  final _controller = TextEditingController();
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: const BoxDecoration(
+        color: AppTheme.surfaceDark,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      padding: EdgeInsets.only(
+        bottom: MediaQuery.of(context).viewInsets.bottom,
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _buildHandle(),
+          Padding(
+            padding: const EdgeInsets.all(20),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Load from PGN',
+                  style: Theme.of(context).textTheme.headlineSmall,
+                ),
+                const SizedBox(height: 16),
+                TextField(
+                  controller: _controller,
+                  maxLines: 8,
+                  decoration: InputDecoration(
+                    hintText: 'Paste PGN or FEN here...',
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    filled: true,
+                    fillColor: AppTheme.cardDark,
+                  ),
+                ),
+                const SizedBox(height: 16),
+                SizedBox(
+                  width: double.infinity,
+                  height: 48,
+                  child: ElevatedButton(
+                    onPressed: () {
+                      if (_controller.text.isNotEmpty) {
+                        widget.onLoad(_controller.text);
+                      }
+                    },
+                    child: const Text('Load'),
+                  ),
+                ),
+                const SizedBox(height: 16),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildHandle() {
+    return Container(
+      margin: const EdgeInsets.only(top: 12),
+      width: 40,
+      height: 4,
+      decoration: BoxDecoration(
+        color: Colors.grey[600],
+        borderRadius: BorderRadius.circular(2),
       ),
     );
   }
