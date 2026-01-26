@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:chess_master/core/services/stockfish_service.dart';
 import 'package:chess_master/core/constants/app_constants.dart';
@@ -84,7 +85,12 @@ class EngineNotifier extends StateNotifier<EngineState> {
 
   /// Initialize the engine
   Future<void> initialize() async {
-    await _service.initialize();
+    try {
+      await _service.initialize();
+    } catch (e) {
+      // Engine initialization failed - continue without engine
+      debugPrint('Engine initialization failed: $e');
+    }
   }
 
   /// Get best move for bot to play
@@ -130,22 +136,13 @@ class EngineNotifier extends StateNotifier<EngineState> {
   }
 
   /// Get a hint for the player
-  Future<BestMoveResult?> getHint({
-    required String fen,
-    int depth = 15,
-  }) async {
+  Future<BestMoveResult?> getHint({required String fen, int depth = 15}) async {
     state = state.copyWith(isThinking: true);
 
     try {
-      final result = await _service.getBestMove(
-        fen: fen,
-        depth: depth,
-      );
+      final result = await _service.getBestMove(fen: fen, depth: depth);
 
-      state = state.copyWith(
-        isThinking: false,
-        bestMove: result.bestMove,
-      );
+      state = state.copyWith(isThinking: false, bestMove: result.bestMove);
 
       return result;
     } catch (e) {
@@ -213,13 +210,18 @@ class EngineNotifier extends StateNotifier<EngineState> {
 }
 
 /// Provider for engine state and operations
-final engineProvider = StateNotifierProvider<EngineNotifier, EngineState>((ref) {
+final engineProvider = StateNotifierProvider<EngineNotifier, EngineState>((
+  ref,
+) {
   final service = ref.watch(stockfishServiceProvider);
   return EngineNotifier(service);
 });
 
 /// Provider for getting a hint
-final hintProvider = FutureProvider.family<BestMoveResult?, String>((ref, fen) async {
+final hintProvider = FutureProvider.family<BestMoveResult?, String>((
+  ref,
+  fen,
+) async {
   final engineNotifier = ref.read(engineProvider.notifier);
   return engineNotifier.getHint(fen: fen);
 });

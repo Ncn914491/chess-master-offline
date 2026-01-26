@@ -228,40 +228,165 @@ class _PuzzleScreenState extends ConsumerState<PuzzleScreen> {
       );
     }
 
-    return Row(
+    return Column(
       children: [
-        // Hint button
-        Expanded(
-          child: OutlinedButton.icon(
-            onPressed: state.isPlayerTurn && !state.showingHint
-                ? () => notifier.showHint()
-                : null,
-            icon: const Icon(Icons.lightbulb_outline),
-            label: Text('Hint (${3 - state.hintsUsed} left)'),
-            style: OutlinedButton.styleFrom(
-              foregroundColor: AppTheme.accentColor,
-              side: BorderSide(color: AppTheme.accentColor.withOpacity(0.5)),
-              padding: const EdgeInsets.symmetric(vertical: 16),
+        // First row: Hint and Show Solution
+        Row(
+          children: [
+            // Hint button - no limit
+            Expanded(
+              child: OutlinedButton.icon(
+                onPressed: state.isPlayerTurn && !state.showingHint
+                    ? () => notifier.showHint()
+                    : null,
+                icon: const Icon(Icons.lightbulb_outline),
+                label: const Text('Hint'),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: AppTheme.accentColor,
+                  side: BorderSide(color: AppTheme.accentColor.withOpacity(0.5)),
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                ),
+              ),
             ),
-          ),
-        ),
-        const SizedBox(width: 16),
-        // Skip button
-        Expanded(
-          child: OutlinedButton.icon(
-            onPressed: () => _showSkipConfirmation(),
-            icon: const Icon(Icons.skip_next),
-            label: const Text('Skip'),
-            style: OutlinedButton.styleFrom(
-              foregroundColor: AppTheme.textSecondary,
-              side: const BorderSide(color: AppTheme.textHint),
-              padding: const EdgeInsets.symmetric(vertical: 16),
+            const SizedBox(width: 12),
+            // Show Solution button
+            Expanded(
+              child: OutlinedButton.icon(
+                onPressed: () => _showSolutionDialog(state),
+                icon: const Icon(Icons.visibility),
+                label: const Text('Solution'),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: Colors.orange,
+                  side: BorderSide(color: Colors.orange.withOpacity(0.5)),
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                ),
+              ),
             ),
-          ),
+            const SizedBox(width: 12),
+            // Skip button
+            Expanded(
+              child: OutlinedButton.icon(
+                onPressed: () => _showSkipConfirmation(),
+                icon: const Icon(Icons.skip_next),
+                label: const Text('Skip'),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: AppTheme.textSecondary,
+                  side: const BorderSide(color: AppTheme.textHint),
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                ),
+              ),
+            ),
+          ],
         ),
       ],
     );
   }
+
+  void _showSolutionDialog(PuzzleGameState state) {
+    final puzzle = state.currentPuzzle;
+    if (puzzle == null) return;
+
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: AppTheme.surfaceDark,
+        title: Row(
+          children: [
+            const Icon(Icons.lightbulb, color: Colors.orange),
+            const SizedBox(width: 8),
+            const Text('Solution'),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Complete solution moves:',
+              style: TextStyle(color: AppTheme.textSecondary),
+            ),
+            const SizedBox(height: 12),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: AppTheme.cardDark,
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  for (int i = 0; i < puzzle.moves.length; i++)
+                    Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 4),
+                      child: Row(
+                        children: [
+                          Container(
+                            width: 24,
+                            height: 24,
+                            decoration: BoxDecoration(
+                              color: i % 2 == 0 
+                                  ? AppTheme.primaryColor.withOpacity(0.3)
+                                  : Colors.grey.withOpacity(0.3),
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                            child: Center(
+                              child: Text(
+                                '${i + 1}',
+                                style: const TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Text(
+                            puzzle.moves[i],
+                            style: TextStyle(
+                              fontFamily: 'monospace',
+                              fontSize: 16,
+                              fontWeight: i % 2 == 0 ? FontWeight.bold : FontWeight.normal,
+                              color: i % 2 == 0 ? Colors.white : AppTheme.textSecondary,
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Text(
+                            i % 2 == 0 ? '(Your move)' : '(Response)',
+                            style: TextStyle(
+                              fontSize: 11,
+                              color: AppTheme.textHint,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 12),
+            Text(
+              'Note: Viewing solution counts as a hint.',
+              style: TextStyle(
+                fontSize: 12,
+                color: AppTheme.textHint,
+                fontStyle: FontStyle.italic,
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          ElevatedButton(
+            onPressed: () {
+              Navigator.pop(context);
+              ref.read(puzzleProvider.notifier).showSolution();
+            },
+            child: const Text('Got it'),
+          ),
+        ],
+      ),
+    );
+  }
+
 
   void _showSkipConfirmation() {
     showDialog(

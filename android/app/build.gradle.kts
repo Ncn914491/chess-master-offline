@@ -4,24 +4,15 @@ import java.io.FileInputStream
 plugins {
     id("com.android.application")
     id("kotlin-android")
-    // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
     id("dev.flutter.flutter-gradle-plugin")
 }
 
+// Load keystore properties
 val keystorePropertiesFile = rootProject.file("key.properties")
 val keystoreProperties = Properties()
-var useReleaseKeystore = false
 
 if (keystorePropertiesFile.exists()) {
-    try {
-        keystoreProperties.load(FileInputStream(keystorePropertiesFile))
-        val storeFilePath = keystoreProperties.getProperty("storeFile")
-        if (storeFilePath != null && file(storeFilePath).exists()) {
-            useReleaseKeystore = true
-        }
-    } catch (e: Exception) {
-        println("Warning: Could not load key.properties: ${e.message}")
-    }
+    keystoreProperties.load(FileInputStream(keystorePropertiesFile))
 }
 
 android {
@@ -47,24 +38,17 @@ android {
     }
 
     signingConfigs {
-        if (useReleaseKeystore) {
-            create("release") {
-                keyAlias = keystoreProperties.getProperty("keyAlias")
-                keyPassword = keystoreProperties.getProperty("keyPassword")
-                storeFile = file(keystoreProperties.getProperty("storeFile"))
-                storePassword = keystoreProperties.getProperty("storePassword")
-            }
+        create("release") {
+            storeFile = rootProject.file(keystoreProperties.getProperty("storeFile") ?: "upload-keystore.jks")
+            storePassword = keystoreProperties.getProperty("storePassword") ?: ""
+            keyAlias = keystoreProperties.getProperty("keyAlias") ?: ""
+            keyPassword = keystoreProperties.getProperty("keyPassword") ?: ""
         }
     }
 
     buildTypes {
         release {
-            signingConfig = if (useReleaseKeystore) {
-                signingConfigs.getByName("release")
-            } else {
-                signingConfigs.getByName("debug")
-            }
-            // Disable minification for now - Flutter handles optimization
+            signingConfig = signingConfigs.getByName("release")
             isMinifyEnabled = false
             isShrinkResources = false
         }

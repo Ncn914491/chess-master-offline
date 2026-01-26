@@ -18,16 +18,20 @@ class GameNotifier extends StateNotifier<GameState> {
     required PlayerColor playerColor,
     required DifficultyLevel difficulty,
     required TimeControl timeControl,
+    GameMode gameMode = GameMode.bot,
+    bool allowTakeback = true,
+    bool showHints = true,
+    bool useTimer = true,
     String? startingFen,
   }) {
     // Handle random color selection
-    final actualColor = playerColor == PlayerColor.random
-        ? (Random().nextBool() ? PlayerColor.white : PlayerColor.black)
-        : playerColor;
+    final actualColor =
+        playerColor == PlayerColor.random
+            ? (Random().nextBool() ? PlayerColor.white : PlayerColor.black)
+            : playerColor;
 
-    final board = startingFen != null
-        ? chess.Chess.fromFEN(startingFen)
-        : chess.Chess();
+    final board =
+        startingFen != null ? chess.Chess.fromFEN(startingFen) : chess.Chess();
 
     state = GameState(
       id: DateTime.now().millisecondsSinceEpoch.toString(),
@@ -35,7 +39,21 @@ class GameNotifier extends StateNotifier<GameState> {
       status: GameStatus.active,
       playerColor: actualColor,
       difficulty: difficulty,
-      timeControl: timeControl,
+      timeControl:
+          useTimer
+              ? timeControl
+              : AppConstants.timeControls.firstWhere(
+                (tc) => tc.minutes == 0,
+                orElse:
+                    () => const TimeControl(
+                      name: 'No Timer',
+                      minutes: 0,
+                      increment: 0,
+                    ),
+              ),
+      gameMode: gameMode,
+      allowTakeback: allowTakeback,
+      hintsUsed: 0,
       whiteTime: timeControl.initialDuration,
       blackTime: timeControl.initialDuration,
       startedAt: DateTime.now(),
@@ -68,7 +86,8 @@ class GameNotifier extends StateNotifier<GameState> {
 
     // Check if the piece belongs to the current player
     final isWhitePiece = piece.color == chess.Color.WHITE;
-    final canMove = (state.isWhiteTurn && isWhitePiece) ||
+    final canMove =
+        (state.isWhiteTurn && isWhitePiece) ||
         (!state.isWhiteTurn && !isWhitePiece);
 
     if (!canMove) {
@@ -92,7 +111,8 @@ class GameNotifier extends StateNotifier<GameState> {
 
     // Check if this is a pawn promotion
     final piece = board.get(from);
-    final isPromotion = piece?.type == chess.PieceType.PAWN &&
+    final isPromotion =
+        piece?.type == chess.PieceType.PAWN &&
         ((piece?.color == chess.Color.WHITE && to[1] == '8') ||
             (piece?.color == chess.Color.BLACK && to[1] == '1'));
 
@@ -109,7 +129,7 @@ class GameNotifier extends StateNotifier<GameState> {
     // Get the move in SAN format before making the move
     // The move() method returns bool and mutates the board
     final moveSuccess = board.move(moveMap);
-    
+
     if (!moveSuccess) {
       state = state.copyWith(clearSelection: true);
       return;
@@ -118,14 +138,15 @@ class GameNotifier extends StateNotifier<GameState> {
     // Get the last move from history to extract details
     final history = board.getHistory({'verbose': true});
     final lastMove = history.isNotEmpty ? history.last as Map : null;
-    
+
     // Get SAN from the board's move history
     final sanHistory = board.getHistory();
     final san = sanHistory.isNotEmpty ? sanHistory.last.toString() : '$from$to';
-    
+
     final isCapture = lastMove?['captured'] != null;
-    final isCastle = lastMove?['flags']?.toString().contains('k') == true || 
-                     lastMove?['flags']?.toString().contains('q') == true;
+    final isCastle =
+        lastMove?['flags']?.toString().contains('k') == true ||
+        lastMove?['flags']?.toString().contains('q') == true;
 
     // Create move record
     final chessMove = ChessMove(
@@ -146,9 +167,10 @@ class GameNotifier extends StateNotifier<GameState> {
     GameStatus status = GameStatus.active;
 
     if (board.in_checkmate) {
-      result = board.turn == chess.Color.WHITE
-          ? GameResult.blackWins
-          : GameResult.whiteWins;
+      result =
+          board.turn == chess.Color.WHITE
+              ? GameResult.blackWins
+              : GameResult.whiteWins;
       resultReason = 'Checkmate';
       status = GameStatus.finished;
     } else if (board.in_stalemate) {
@@ -215,9 +237,10 @@ class GameNotifier extends StateNotifier<GameState> {
     }
 
     // Rebuild move history
-    final newHistory = state.moveHistory.length > 1
-        ? state.moveHistory.sublist(0, state.moveHistory.length - 2)
-        : <ChessMove>[];
+    final newHistory =
+        state.moveHistory.length > 1
+            ? state.moveHistory.sublist(0, state.moveHistory.length - 2)
+            : <ChessMove>[];
 
     final lastMove = newHistory.isNotEmpty ? newHistory.last : null;
 
@@ -242,9 +265,10 @@ class GameNotifier extends StateNotifier<GameState> {
   void resign() {
     if (state.status != GameStatus.active) return;
 
-    final result = state.playerColor == PlayerColor.white
-        ? GameResult.blackWins
-        : GameResult.whiteWins;
+    final result =
+        state.playerColor == PlayerColor.white
+            ? GameResult.blackWins
+            : GameResult.whiteWins;
 
     state = state.copyWith(
       status: GameStatus.finished,
@@ -299,6 +323,130 @@ class GameNotifier extends StateNotifier<GameState> {
   /// Reset to initial state
   void reset() {
     state = GameState.initial();
+  }
+
+  /// Validate that the board displays the correct starting position
+  bool validateStartingPosition() {
+    if (state.moveHistory.isNotEmpty) return false;
+
+    // Check that we have the standard starting FEN
+    const startingFen =
+        'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
+    return state.fen == startingFen;
+  }
+
+  /// Validate that all 32 pieces are correctly placed (for any position)
+  bool validateAllPiecesPlaced() {
+    int pieceCount = 0;
+
+    // Check all squares for pieces
+    for (int rank = 1; rank <= 8; rank++) {
+      for (String file in ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h']) {
+        final square = '$file$rank';
+        final piece = state.board.get(square);
+        if (piece != null) {
+          pieceCount++;
+        }
+      }
+    }
+
+    // Should have exactly 32 pieces in starting position, or fewer if captures occurred
+    return pieceCount <= 32 && pieceCount >= 2; // At least 2 kings must remain
+  }
+
+  /// Validate that all 32 pieces are in starting position specifically
+  bool validateStartingPieceCount() {
+    if (state.moveHistory.isNotEmpty) return false;
+
+    int pieceCount = 0;
+    for (int rank = 1; rank <= 8; rank++) {
+      for (String file in ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h']) {
+        final square = '$file$rank';
+        final piece = state.board.get(square);
+        if (piece != null) {
+          pieceCount++;
+        }
+      }
+    }
+
+    return pieceCount == 32;
+  }
+
+  /// Validate specific piece placements in starting position
+  bool validatePiecePlacements() {
+    if (state.moveHistory.isNotEmpty) return false;
+
+    // White pieces
+    final whitePieces = {
+      'a1': chess.PieceType.ROOK,
+      'b1': chess.PieceType.KNIGHT,
+      'c1': chess.PieceType.BISHOP,
+      'd1': chess.PieceType.QUEEN,
+      'e1': chess.PieceType.KING,
+      'f1': chess.PieceType.BISHOP,
+      'g1': chess.PieceType.KNIGHT,
+      'h1': chess.PieceType.ROOK,
+    };
+
+    // Black pieces
+    final blackPieces = {
+      'a8': chess.PieceType.ROOK,
+      'b8': chess.PieceType.KNIGHT,
+      'c8': chess.PieceType.BISHOP,
+      'd8': chess.PieceType.QUEEN,
+      'e8': chess.PieceType.KING,
+      'f8': chess.PieceType.BISHOP,
+      'g8': chess.PieceType.KNIGHT,
+      'h8': chess.PieceType.ROOK,
+    };
+
+    // Check white pieces
+    for (final entry in whitePieces.entries) {
+      final piece = state.board.get(entry.key);
+      if (piece == null ||
+          piece.type != entry.value ||
+          piece.color != chess.Color.WHITE) {
+        return false;
+      }
+    }
+
+    // Check black pieces
+    for (final entry in blackPieces.entries) {
+      final piece = state.board.get(entry.key);
+      if (piece == null ||
+          piece.type != entry.value ||
+          piece.color != chess.Color.BLACK) {
+        return false;
+      }
+    }
+
+    // Check pawns
+    for (String file in ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h']) {
+      // White pawns on rank 2
+      final whitePawn = state.board.get('${file}2');
+      if (whitePawn == null ||
+          whitePawn.type != chess.PieceType.PAWN ||
+          whitePawn.color != chess.Color.WHITE) {
+        return false;
+      }
+
+      // Black pawns on rank 7
+      final blackPawn = state.board.get('${file}7');
+      if (blackPawn == null ||
+          blackPawn.type != chess.PieceType.PAWN ||
+          blackPawn.color != chess.Color.BLACK) {
+        return false;
+      }
+    }
+
+    return true;
+  }
+
+  /// Comprehensive board display validation
+  bool validateBoardDisplay() {
+    return validateStartingPosition() &&
+        validateStartingPieceCount() &&
+        validatePiecePlacements();
   }
 
   /// Get piece at square

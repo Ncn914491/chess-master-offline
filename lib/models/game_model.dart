@@ -83,6 +83,8 @@ class GameState {
   final PlayerColor playerColor;
   final DifficultyLevel difficulty;
   final TimeControl timeControl;
+  final GameMode gameMode;
+  final bool allowTakeback;
   final int hintsUsed;
   final String? selectedSquare;
   final List<String> legalMoves;
@@ -103,6 +105,8 @@ class GameState {
     this.playerColor = PlayerColor.white,
     DifficultyLevel? difficulty,
     TimeControl? timeControl,
+    this.gameMode = GameMode.bot,
+    this.allowTakeback = true,
     this.hintsUsed = 0,
     this.selectedSquare,
     this.legalMoves = const [],
@@ -139,8 +143,12 @@ class GameState {
   /// Is it white's turn
   bool get isWhiteTurn => board.turn == chess.Color.WHITE;
 
-  /// Is it the player's turn
+  /// Is local multiplayer mode
+  bool get isLocalMultiplayer => gameMode == GameMode.localMultiplayer;
+
+  /// Is it the player's turn (in local multiplayer, always true since both players use same device)
   bool get isPlayerTurn {
+    if (isLocalMultiplayer) return true; // Both players take turns on same device
     if (playerColor == PlayerColor.white) {
       return isWhiteTurn;
     } else if (playerColor == PlayerColor.black) {
@@ -170,11 +178,11 @@ class GameState {
   /// Full move count
   int get fullMoveCount => moveHistory.length;
 
-  /// Can request hint
-  bool get canRequestHint => hintsUsed < AppConstants.maxHintsPerGame;
+  /// Can request hint (only in bot mode)
+  bool get canRequestHint => !isLocalMultiplayer && hintsUsed < AppConstants.maxHintsPerGame;
 
   /// Can undo move
-  bool get canUndo => moveHistory.isNotEmpty && status == GameStatus.active;
+  bool get canUndo => moveHistory.isNotEmpty && status == GameStatus.active && allowTakeback;
 
   /// Copy with new values
   GameState copyWith({
@@ -185,6 +193,8 @@ class GameState {
     PlayerColor? playerColor,
     DifficultyLevel? difficulty,
     TimeControl? timeControl,
+    GameMode? gameMode,
+    bool? allowTakeback,
     int? hintsUsed,
     String? selectedSquare,
     List<String>? legalMoves,
@@ -207,6 +217,8 @@ class GameState {
       playerColor: playerColor ?? this.playerColor,
       difficulty: difficulty ?? this.difficulty,
       timeControl: timeControl ?? this.timeControl,
+      gameMode: gameMode ?? this.gameMode,
+      allowTakeback: allowTakeback ?? this.allowTakeback,
       hintsUsed: hintsUsed ?? this.hintsUsed,
       selectedSquare: clearSelection ? null : (selectedSquare ?? this.selectedSquare),
       legalMoves: clearSelection ? [] : (legalMoves ?? this.legalMoves),

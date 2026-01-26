@@ -113,6 +113,13 @@ enum PlayerColor {
   }
 }
 
+/// Game mode type
+enum GameMode {
+  bot,             // Play against AI
+  localMultiplayer, // 2 players on same device
+  analysis,        // Analysis mode
+}
+
 /// Game result types
 enum GameResult {
   whiteWins('1-0', 'White wins'),

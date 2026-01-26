@@ -32,6 +32,7 @@ class AppSettings {
   final bool soundEnabled;
   final bool vibrationEnabled;
   final bool boardFlipped;
+  final bool autoFlipBoard; // Auto flip for black pieces (default OFF)
   final int lastDifficultyLevel;
   final int lastTimeControlIndex;
 
@@ -45,6 +46,7 @@ class AppSettings {
     this.soundEnabled = true,
     this.vibrationEnabled = true,
     this.boardFlipped = false,
+    this.autoFlipBoard = false, // Default OFF as requested
     this.lastDifficultyLevel = 5,
     this.lastTimeControlIndex = 0,
   });
@@ -64,6 +66,7 @@ class AppSettings {
     bool? soundEnabled,
     bool? vibrationEnabled,
     bool? boardFlipped,
+    bool? autoFlipBoard,
     int? lastDifficultyLevel,
     int? lastTimeControlIndex,
   }) {
@@ -77,6 +80,7 @@ class AppSettings {
       soundEnabled: soundEnabled ?? this.soundEnabled,
       vibrationEnabled: vibrationEnabled ?? this.vibrationEnabled,
       boardFlipped: boardFlipped ?? this.boardFlipped,
+      autoFlipBoard: autoFlipBoard ?? this.autoFlipBoard,
       lastDifficultyLevel: lastDifficultyLevel ?? this.lastDifficultyLevel,
       lastTimeControlIndex: lastTimeControlIndex ?? this.lastTimeControlIndex,
     );
@@ -102,6 +106,7 @@ class SettingsNotifier extends StateNotifier<AppSettings> {
       soundEnabled: prefs.getBool('soundEnabled') ?? true,
       vibrationEnabled: prefs.getBool('vibrationEnabled') ?? true,
       boardFlipped: prefs.getBool('boardFlipped') ?? false,
+      autoFlipBoard: prefs.getBool('autoFlipBoard') ?? false,
       lastDifficultyLevel: prefs.getInt('lastDifficultyLevel') ?? 5,
       lastTimeControlIndex: prefs.getInt('lastTimeControlIndex') ?? 0,
     );
@@ -119,8 +124,19 @@ class SettingsNotifier extends StateNotifier<AppSettings> {
     await prefs.setBool('soundEnabled', state.soundEnabled);
     await prefs.setBool('vibrationEnabled', state.vibrationEnabled);
     await prefs.setBool('boardFlipped', state.boardFlipped);
+    await prefs.setBool('autoFlipBoard', state.autoFlipBoard);
     await prefs.setInt('lastDifficultyLevel', state.lastDifficultyLevel);
     await prefs.setInt('lastTimeControlIndex', state.lastTimeControlIndex);
+  }
+
+  void toggleAutoFlipBoard() {
+    state = state.copyWith(autoFlipBoard: !state.autoFlipBoard);
+    _saveSettings();
+  }
+
+  void toggleShowLegalMoves() {
+    state = state.copyWith(showLegalMoves: !state.showLegalMoves);
+    _saveSettings();
   }
 
   void setBoardTheme(BoardThemeType theme) {

@@ -42,6 +42,9 @@ class PuzzleGameState {
   final String? lastMoveFrom;
   final String? lastMoveTo;
   final bool showingHint;
+  final String? hintFromSquare;  // Full hint: from square
+  final String? hintToSquare;    // Full hint: to square
+  final bool showingSolution;    // Show complete solution
   final int hintsUsed;
   final int currentRating;
   final int streak;
@@ -60,6 +63,9 @@ class PuzzleGameState {
     this.lastMoveFrom,
     this.lastMoveTo,
     this.showingHint = false,
+    this.hintFromSquare,
+    this.hintToSquare,
+    this.showingSolution = false,
     this.hintsUsed = 0,
     this.currentRating = 1200,
     this.streak = 0,
@@ -79,6 +85,9 @@ class PuzzleGameState {
     String? lastMoveFrom,
     String? lastMoveTo,
     bool? showingHint,
+    String? hintFromSquare,
+    String? hintToSquare,
+    bool? showingSolution,
     int? hintsUsed,
     int? currentRating,
     int? streak,
@@ -88,6 +97,7 @@ class PuzzleGameState {
     bool? isLoading,
     bool clearSelection = false,
     bool clearError = false,
+    bool clearHint = false,
   }) {
     return PuzzleGameState(
       state: state ?? this.state,
@@ -98,7 +108,10 @@ class PuzzleGameState {
       legalMoves: clearSelection ? [] : (legalMoves ?? this.legalMoves),
       lastMoveFrom: lastMoveFrom ?? this.lastMoveFrom,
       lastMoveTo: lastMoveTo ?? this.lastMoveTo,
-      showingHint: showingHint ?? this.showingHint,
+      showingHint: clearHint ? false : (showingHint ?? this.showingHint),
+      hintFromSquare: clearHint ? null : (hintFromSquare ?? this.hintFromSquare),
+      hintToSquare: clearHint ? null : (hintToSquare ?? this.hintToSquare),
+      showingSolution: showingSolution ?? this.showingSolution,
       hintsUsed: hintsUsed ?? this.hintsUsed,
       currentRating: currentRating ?? this.currentRating,
       streak: streak ?? this.streak,
@@ -350,17 +363,15 @@ class PuzzleNotifier extends StateNotifier<PuzzleGameState> {
       if (promotion != null) 'promotion': promotion,
     });
 
-    if (move != null) {
-      // Create new board with same state
-      final newBoard = chess.Chess.fromFEN(state.board!.fen);
-      state = state.copyWith(
-        board: newBoard,
-        lastMoveFrom: from,
-        lastMoveTo: to,
-      );
-      return true;
-    }
-    return false;
+    // Create new board with same state
+    final newBoard = chess.Chess.fromFEN(state.board!.fen);
+    state = state.copyWith(
+      board: newBoard,
+      lastMoveFrom: from,
+      lastMoveTo: to,
+    );
+    return true;
+      return false;
   }
 
   /// Select a square on the board
@@ -497,7 +508,7 @@ class PuzzleNotifier extends StateNotifier<PuzzleGameState> {
       ratingChange = -(32 * expectedScore).round();
     }
 
-    final newRating = (currentRating + ratingChange).clamp(100, 3000) as int;
+    final newRating = (currentRating + ratingChange).clamp(100, 3000);
     final newStreak = solved ? state.streak + 1 : 0;
 
     state = state.copyWith(
@@ -516,7 +527,7 @@ class PuzzleNotifier extends StateNotifier<PuzzleGameState> {
     });
   }
 
-  /// Show hint for current position
+  /// Show hint for current position - shows full move with arrow
   void showHint() {
     if (state.state != PuzzleState.playing || !state.isPlayerTurn) return;
     
@@ -527,22 +538,44 @@ class PuzzleNotifier extends StateNotifier<PuzzleGameState> {
     if (expectedMove == null) return;
 
     final fromSquare = expectedMove.substring(0, 2);
+    final toSquare = expectedMove.substring(2, 4);
     
     state = state.copyWith(
       showingHint: true,
+      hintFromSquare: fromSquare,
+      hintToSquare: toSquare,
       hintsUsed: state.hintsUsed + 1,
-      selectedSquare: fromSquare,
     );
 
-    // Hide hint after 2 seconds
-    Future.delayed(const Duration(seconds: 2), () {
+    // Hide hint after 3 seconds
+    Future.delayed(const Duration(seconds: 3), () {
       if (state.showingHint) {
-        state = state.copyWith(
-          showingHint: false,
-          clearSelection: true,
-        );
+        state = state.copyWith(clearHint: true);
       }
     });
+  }
+
+  /// Show complete solution for the puzzle
+  void showSolution() {
+    if (state.currentPuzzle == null) return;
+    
+    state = state.copyWith(
+      showingSolution: true,
+      hintsUsed: state.hintsUsed + 1, // Count as hint usage
+    );
+  }
+
+  /// Hide solution
+  void hideSolution() {
+    state = state.copyWith(showingSolution: false);
+  }
+
+  /// Get all solution moves for current puzzle
+  List<String> getSolutionMoves() {
+    final puzzle = state.currentPuzzle;
+    if (puzzle == null) return [];
+    
+    return puzzle.moves;
   }
 
   /// Skip current puzzle

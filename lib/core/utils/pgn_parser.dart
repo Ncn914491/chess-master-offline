@@ -1,5 +1,6 @@
 /// PGN (Portable Game Notation) Parser and Generator
 /// Handles import/export of chess games in standard PGN format
+library;
 
 class PgnParser {
   /// Parse a PGN string and extract game data

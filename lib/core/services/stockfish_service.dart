@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:flutter/foundation.dart';
 import 'package:stockfish_chess_engine/stockfish_chess_engine.dart';
 import 'package:chess_master/core/constants/app_constants.dart';
 
@@ -8,8 +9,9 @@ class StockfishService {
   static StockfishService? _instance;
   Stockfish? _stockfish;
   bool _isReady = false;
-  final StreamController<String> _outputController = StreamController<String>.broadcast();
-  
+  final StreamController<String> _outputController =
+      StreamController<String>.broadcast();
+
   /// Singleton instance
   static StockfishService get instance {
     _instance ??= StockfishService._();
@@ -27,10 +29,10 @@ class StockfishService {
   /// Initialize the Stockfish engine
   Future<void> initialize() async {
     if (_stockfish != null && _isReady) return;
-    
+
     try {
       _stockfish = Stockfish();
-      
+
       // Listen to engine output
       _stockfish!.stdout.listen((line) {
         _outputController.add(line);
@@ -41,16 +43,19 @@ class StockfishService {
 
       // Initialize UCI mode
       _sendCommand('uci');
-      
-      // Wait for engine to be ready
+
+      // Wait for engine to be ready with timeout
       await _waitForReady();
-      
+
       // Configure engine for mobile performance
       _configureEngine();
-      
     } catch (e) {
-      print('Failed to initialize Stockfish: $e');
-      rethrow;
+      // Engine initialization failed - this is acceptable for basic gameplay
+      // Games can still be played without engine (local multiplayer, manual analysis)
+      debugPrint('Stockfish engine initialization failed: $e');
+      debugPrint('Games can still be played in local multiplayer mode');
+      _isReady = false;
+      // Don't rethrow - allow app to continue without engine
     }
   }
 
@@ -67,13 +72,13 @@ class StockfishService {
   /// Wait for engine to be ready
   Future<void> _waitForReady() async {
     _sendCommand('isready');
-    
+
     int attempts = 0;
     while (!_isReady && attempts < 50) {
       await Future.delayed(const Duration(milliseconds: 100));
       attempts++;
     }
-    
+
     if (!_isReady) {
       throw Exception('Stockfish failed to initialize after 5 seconds');
     }
@@ -81,7 +86,9 @@ class StockfishService {
 
   /// Send a command to the engine
   void _sendCommand(String command) {
-    _stockfish?.stdin = command;
+    if (_stockfish != null) {
+      _stockfish?.stdin = command;
+    }
   }
 
   /// Get the best move for a given position
@@ -111,13 +118,13 @@ class StockfishService {
         if (scoreMatch != null) {
           evaluation = int.parse(scoreMatch.group(1)!);
         }
-        
+
         final mateMatch = RegExp(r'score mate (-?\d+)').firstMatch(line);
         if (mateMatch != null) {
           mateIn = int.parse(mateMatch.group(1)!);
         }
       }
-      
+
       // Parse best move
       if (line.startsWith('bestmove')) {
         final parts = line.split(' ');
@@ -127,20 +134,22 @@ class StockfishService {
         if (parts.length >= 4 && parts[2] == 'ponder') {
           ponderMove = parts[3];
         }
-        
+
         subscription.cancel();
-        completer.complete(BestMoveResult(
-          bestMove: bestMove ?? '',
-          ponderMove: ponderMove,
-          evaluation: evaluation,
-          mateIn: mateIn,
-        ));
+        completer.complete(
+          BestMoveResult(
+            bestMove: bestMove ?? '',
+            ponderMove: ponderMove,
+            evaluation: evaluation,
+            mateIn: mateIn,
+          ),
+        );
       }
     });
 
     // Set position
     _sendCommand('position fen $fen');
-    
+
     // Start search
     if (thinkTimeMs != null) {
       _sendCommand('go depth $depth movetime $thinkTimeMs');
@@ -189,7 +198,8 @@ class StockfishService {
 
         if (pvMovesMatch != null) {
           final pvNumber = pvMatch != null ? int.parse(pvMatch.group(1)!) : 1;
-          final currentDepth = depthMatch != null ? int.parse(depthMatch.group(1)!) : 0;
+          final currentDepth =
+              depthMatch != null ? int.parse(depthMatch.group(1)!) : 0;
           int? eval;
           int? mate;
 
@@ -217,12 +227,14 @@ class StockfishService {
               depth: currentDepth,
             );
           } else {
-            lines.add(EngineLine(
-              moves: moves,
-              evaluation: eval,
-              mateIn: mate,
-              depth: currentDepth,
-            ));
+            lines.add(
+              EngineLine(
+                moves: moves,
+                evaluation: eval,
+                mateIn: mate,
+                depth: currentDepth,
+              ),
+            );
           }
         }
       }
@@ -231,13 +243,15 @@ class StockfishService {
         subscription.cancel();
         // Reset MultiPV to 1
         _sendCommand('setoption name MultiPV value 1');
-        
-        completer.complete(AnalysisResult(
-          evaluation: mainEvaluation ?? 0,
-          mateIn: mateIn,
-          lines: lines,
-          depth: depth,
-        ));
+
+        completer.complete(
+          AnalysisResult(
+            evaluation: mainEvaluation ?? 0,
+            mateIn: mateIn,
+            lines: lines,
+            depth: depth,
+          ),
+        );
       }
     });
 
@@ -251,11 +265,7 @@ class StockfishService {
         subscription.cancel();
         _sendCommand('stop');
         _sendCommand('setoption name MultiPV value 1');
-        return AnalysisResult(
-          evaluation: 0,
-          lines: [],
-          depth: 0,
-        );
+        return AnalysisResult(evaluation: 0, lines: [], depth: 0);
       },
     );
   }
@@ -301,11 +311,11 @@ class BestMoveResult {
   /// Parse UCI move format (e.g., "e2e4") to from/to squares
   (String from, String to, String? promotion) get parsedMove {
     if (bestMove.length < 4) return ('', '', null);
-    
+
     final from = bestMove.substring(0, 2);
     final to = bestMove.substring(2, 4);
     final promotion = bestMove.length > 4 ? bestMove.substring(4, 5) : null;
-    
+
     return (from, to, promotion);
   }
 

@@ -3,7 +3,6 @@ import 'package:chess/chess.dart' as chess;
 import 'package:chess_master/models/game_model.dart';
 import 'package:chess_master/models/analysis_model.dart';
 import 'package:chess_master/core/services/stockfish_service.dart' as stockfish;
-import 'package:chess_master/core/services/database_service.dart';
 import 'package:chess_master/core/constants/app_constants.dart';
 
 /// Provider for analysis state
