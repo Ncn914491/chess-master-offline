@@ -28,18 +28,11 @@ class EvalGraph extends StatelessWidget {
       );
     }
 
-    // Clamp evaluations for display
-    final clampedEvals = evaluations.map((e) => e.clamp(-10.0, 10.0)).toList();
-    
     // Create spots for the line chart
-    final spots = <FlSpot>[];
-    for (int i = 0; i < clampedEvals.length; i++) {
-      spots.add(FlSpot(i.toDouble(), clampedEvals[i]));
-    }
-
-    // Find min/max for gradient
-    final minEval = clampedEvals.reduce((a, b) => a < b ? a : b);
-    final maxEval = clampedEvals.reduce((a, b) => a > b ? a : b);
+    final spots = List.generate(
+      evaluations.length,
+      (i) => FlSpot(i.toDouble(), evaluations[i].clamp(-10.0, 10.0)),
+    );
 
     return Container(
       height: 120,
@@ -53,7 +46,7 @@ class EvalGraph extends StatelessWidget {
           minY: -10,
           maxY: 10,
           minX: 0,
-          maxX: (clampedEvals.length - 1).toDouble(),
+          maxX: (evaluations.length - 1).toDouble(),
           gridData: FlGridData(
             show: true,
             drawVerticalLine: false,
@@ -80,7 +73,7 @@ class EvalGraph extends StatelessWidget {
               sideTitles: SideTitles(
                 showTitles: true,
                 reservedSize: 22,
-                interval: _calculateInterval(clampedEvals.length),
+                interval: _calculateInterval(evaluations.length),
                 getTitlesWidget: (value, meta) {
                   if (value == meta.max || value == meta.min) {
                     return const SizedBox.shrink();
@@ -145,11 +138,11 @@ class EvalGraph extends StatelessWidget {
                 },
                 checkToShowDot: (spot, barData) {
                   // Show fewer dots for long games
-                  if (clampedEvals.length > 60) {
+                  if (evaluations.length > 60) {
                     return spot.x.toInt() == currentMoveIndex || 
                            spot.x.toInt() % 10 == 0;
                   }
-                  if (clampedEvals.length > 30) {
+                  if (evaluations.length > 30) {
                     return spot.x.toInt() == currentMoveIndex || 
                            spot.x.toInt() % 5 == 0;
                   }
