@@ -78,24 +78,17 @@ class MoveList extends ConsumerWidget {
   }
 
   Widget _buildFullList(BuildContext context) {
-    final movePairs = <List<ChessMove?>>[];
-    
-    for (int i = 0; i < moves.length; i += 2) {
-      movePairs.add([
-        moves[i],
-        i + 1 < moves.length ? moves[i + 1] : null,
-      ]);
-    }
-
     return ListView.builder(
       shrinkWrap: true,
       physics: const ClampingScrollPhysics(),
-      itemCount: movePairs.length,
+      itemCount: (moves.length / 2).ceil(),
       itemBuilder: (context, index) {
-        final pair = movePairs[index];
         final moveNumber = index + 1;
         final whiteIndex = index * 2;
         final blackIndex = index * 2 + 1;
+
+        final whiteMove = moves[whiteIndex];
+        final blackMove = blackIndex < moves.length ? moves[blackIndex] : null;
 
         return Container(
           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
@@ -119,16 +112,16 @@ class MoveList extends ConsumerWidget {
               // White's move
               Expanded(
                 child: _buildMoveButton(
-                  pair[0]!,
+                  whiteMove,
                   whiteIndex,
                   isCurrentMove: currentMoveIndex == whiteIndex,
                 ),
               ),
               // Black's move
               Expanded(
-                child: pair[1] != null
+                child: blackMove != null
                     ? _buildMoveButton(
-                        pair[1]!,
+                        blackMove,
                         blackIndex,
                         isCurrentMove: currentMoveIndex == blackIndex,
                       )
