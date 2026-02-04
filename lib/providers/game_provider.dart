@@ -234,18 +234,25 @@ class GameNotifier extends StateNotifier<GameState> {
     if (!state.canUndo) return;
 
     final board = state.board.copy();
-    board.undo();
+    int movesToUndo = 1;
 
-    // Also undo bot's move if it was bot's turn after player's move
-    if (!state.isPlayerTurn && state.moveHistory.length > 1) {
+    // If playing against bot and it's player's turn (meaning last move was bot's),
+    // we undo twice to go back to before player's move.
+    if (state.gameMode == GameMode.bot &&
+        state.isPlayerTurn &&
+        state.moveHistory.length >= 2) {
+      movesToUndo = 2;
+    }
+
+    for (int i = 0; i < movesToUndo; i++) {
       board.undo();
     }
 
     // Rebuild move history
-    final newHistory =
-        state.moveHistory.length > 1
-            ? state.moveHistory.sublist(0, state.moveHistory.length - 2)
-            : <ChessMove>[];
+    final newHistoryLength = state.moveHistory.length - movesToUndo;
+    final newHistory = newHistoryLength > 0
+        ? state.moveHistory.sublist(0, newHistoryLength)
+        : <ChessMove>[];
 
     final lastMove = newHistory.isNotEmpty ? newHistory.last : null;
 
