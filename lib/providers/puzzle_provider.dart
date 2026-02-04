@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:math';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:chess/chess.dart' as chess;
@@ -225,8 +226,7 @@ class PuzzleNotifier extends StateNotifier<PuzzleGameState> {
   Future<void> _loadPuzzles() async {
     try {
       final String jsonString = await rootBundle.loadString('assets/puzzles/puzzles.json');
-      final List<dynamic> jsonList = json.decode(jsonString);
-      _allPuzzles = jsonList.map((j) => Puzzle.fromJson(j)).toList();
+      _allPuzzles = await compute(_parsePuzzles, jsonString);
     } catch (e) {
       // If JSON doesn't exist, use empty list
       _allPuzzles = [];
@@ -380,7 +380,6 @@ class PuzzleNotifier extends StateNotifier<PuzzleGameState> {
       lastMoveTo: to,
     );
     return true;
-      return false;
   }
 
   /// Select a square on the board
@@ -645,4 +644,10 @@ class PuzzleNotifier extends StateNotifier<PuzzleGameState> {
     final piece = state.board!.get(square);
     return piece != null && piece.color != state.board!.turn;
   }
+}
+
+/// Parse puzzles in a separate isolate
+List<Puzzle> _parsePuzzles(String jsonString) {
+  final List<dynamic> jsonList = json.decode(jsonString);
+  return jsonList.map((j) => Puzzle.fromJson(j)).toList();
 }
