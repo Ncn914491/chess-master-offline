@@ -62,7 +62,5 @@ flutter:
   assets:
     - assets/pieces/traditional/
     - assets/pieces/modern/
-    - assets/sounds/
     - assets/puzzles/
-    - assets/openings/
 

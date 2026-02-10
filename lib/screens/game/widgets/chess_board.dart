@@ -76,9 +76,8 @@ class ChessBoard extends ConsumerStatefulWidget {
 }
 
 class _ChessBoardState extends ConsumerState<ChessBoard> {
-  String? _draggedFrom;
-  Offset? _dragPosition;
-  String? _draggedPiece;
+  // Drag state managed via ValueNotifier to avoid full rebuilds
+  final ValueNotifier<_DragState> _dragState = ValueNotifier(_DragState.empty());
   chess.Chess? _externalBoard;
 
   @override
@@ -93,6 +92,12 @@ class _ChessBoardState extends ConsumerState<ChessBoard> {
     if (widget.fen != oldWidget.fen) {
       _updateExternalBoard();
     }
+  }
+
+  @override
+  void dispose() {
+    _dragState.dispose();
+    super.dispose();
   }
 
   void _updateExternalBoard() {
@@ -161,87 +166,112 @@ class _ChessBoardState extends ConsumerState<ChessBoard> {
             onTapUp: isInteractive ? (details) => _onTap(details, squareSize, effectiveFlipped) : null,
             child: Stack(
               children: [
-                // Board squares
-                CustomPaint(
-                  size: Size(boardSize, boardSize),
-                  painter: BoardPainter(
-                    theme: theme,
-                    selectedSquare: effectiveSelectedSquare,
-                    lastMoveFrom: effectiveLastMoveFrom,
-                    lastMoveTo: effectiveLastMoveTo,
-                    legalMoves: effectiveLegalMoves,
-                    inCheck: effectiveInCheck,
-                    kingSquare: effectiveKingSquare,
-                    isFlipped: effectiveFlipped,
-                    showCoordinates: effectiveShowCoordinates,
-                    bestMove: widget.bestMove,
-                    showHint: hintMove != null,
-                    hintSquare: hintMove?.from,
-                    getPieceAt: _getPieceAt,
+                // 1. Board squares (background) - RepaintBoundary for performance
+                RepaintBoundary(
+                  child: CustomPaint(
+                    size: Size(boardSize, boardSize),
+                    painter: BoardPainter(
+                      theme: theme,
+                      selectedSquare: effectiveSelectedSquare,
+                      lastMoveFrom: effectiveLastMoveFrom,
+                      lastMoveTo: effectiveLastMoveTo,
+                      legalMoves: effectiveLegalMoves,
+                      inCheck: effectiveInCheck,
+                      kingSquare: effectiveKingSquare,
+                      isFlipped: effectiveFlipped,
+                      showCoordinates: effectiveShowCoordinates,
+                      bestMove: widget.bestMove,
+                      showHint: hintMove != null,
+                      hintSquare: hintMove?.from,
+                      getPieceAt: _getPieceAt,
+                    ),
                   ),
                 ),
-                // Hint arrow
+
+                // 2. Hint arrow
                 if (hintMove != null)
-                  CustomPaint(
-                    size: Size(boardSize, boardSize),
-                    painter: _ArrowPainter(
-                      from: hintMove.from,
-                      to: hintMove.to,
-                      color: Colors.blue.withOpacity(0.7),
-                      squareSize: squareSize,
-                      isFlipped: effectiveFlipped,
+                  RepaintBoundary(
+                    child: CustomPaint(
+                      size: Size(boardSize, boardSize),
+                      painter: _ArrowPainter(
+                        from: hintMove.from,
+                        to: hintMove.to,
+                        color: Colors.blue.withOpacity(0.7),
+                        squareSize: squareSize,
+                        isFlipped: effectiveFlipped,
+                      ),
                     ),
                   ),
-                // Pieces
-                ...List.generate(64, (index) {
-                  final file = index % 8;
-                  final rank = index ~/ 8;
-                  final square = _getSquare(file, rank, effectiveFlipped);
-                  final piece = _getPieceAt(square);
 
-                  // Don't render the piece being dragged at its original position
-                  if (piece == null || square == _draggedFrom) return const SizedBox.shrink();
+                // 3. Pieces Layer
+                ValueListenableBuilder<_DragState>(
+                  valueListenable: _dragState,
+                  builder: (context, dragState, child) {
+                    return Stack(
+                      children: List.generate(64, (index) {
+                        final file = index % 8;
+                        final rank = index ~/ 8;
+                        final square = _getSquare(file, rank, effectiveFlipped);
+                        final piece = _getPieceAt(square);
 
-                  final x = file * squareSize;
-                  final y = rank * squareSize;
+                        // Don't render the piece being dragged at its original position
+                        if (piece == null || square == dragState.fromSquare) return const SizedBox.shrink();
 
-                  return Positioned(
-                    left: x,
-                    top: y,
-                    width: squareSize,
-                    height: squareSize,
-                    child: ChessPiece(
-                      piece: piece,
-                      size: squareSize,
-                      pieceSet: settings.currentPieceSet,
-                    ),
-                  );
-                }),
-                // Best move arrow
+                        final x = file * squareSize;
+                        final y = rank * squareSize;
+
+                        return Positioned(
+                          left: x,
+                          top: y,
+                          width: squareSize,
+                          height: squareSize,
+                          child: ChessPiece(
+                            piece: piece,
+                            size: squareSize,
+                            pieceSet: settings.currentPieceSet,
+                          ),
+                        );
+                      }),
+                    );
+                  },
+                ),
+
+                // 4. Best move arrow
                 if (widget.bestMove != null && widget.bestMove!.length >= 4)
-                  CustomPaint(
-                    size: Size(boardSize, boardSize),
-                    painter: _ArrowPainter(
-                      from: widget.bestMove!.substring(0, 2),
-                      to: widget.bestMove!.substring(2, 4),
-                      color: Colors.green.withOpacity(0.7),
-                      squareSize: squareSize,
-                      isFlipped: effectiveFlipped,
+                  RepaintBoundary(
+                    child: CustomPaint(
+                      size: Size(boardSize, boardSize),
+                      painter: _ArrowPainter(
+                        from: widget.bestMove!.substring(0, 2),
+                        to: widget.bestMove!.substring(2, 4),
+                        color: Colors.green.withOpacity(0.7),
+                        squareSize: squareSize,
+                        isFlipped: effectiveFlipped,
+                      ),
                     ),
                   ),
-                // Dragged piece
-                if (_draggedPiece != null && _dragPosition != null)
-                  Positioned(
-                    left: _dragPosition!.dx - squareSize / 2,
-                    top: _dragPosition!.dy - squareSize / 2,
-                    width: squareSize * 1.2,
-                    height: squareSize * 1.2,
-                    child: ChessPiece(
-                      piece: _draggedPiece!,
-                      size: squareSize * 1.2,
-                      pieceSet: settings.currentPieceSet,
-                    ),
-                  ),
+
+                // 5. Dragged Piece Layer (Optimized)
+                ValueListenableBuilder<_DragState>(
+                  valueListenable: _dragState,
+                  builder: (context, dragState, child) {
+                    if (dragState.piece == null || dragState.position == null) {
+                      return const SizedBox.shrink();
+                    }
+
+                    return Positioned(
+                      left: dragState.position!.dx - squareSize / 2,
+                      top: dragState.position!.dy - squareSize / 2,
+                      width: squareSize * 1.2,
+                      height: squareSize * 1.2,
+                      child: ChessPiece(
+                        piece: dragState.piece!,
+                        size: squareSize * 1.2,
+                        pieceSet: settings.currentPieceSet,
+                      ),
+                    );
+                  },
+                ),
               ],
             ),
           );
@@ -325,11 +355,11 @@ class _ChessBoardState extends ConsumerState<ChessBoard> {
     final piece = _getPieceAt(square);
 
     if (piece != null) {
-      setState(() {
-        _draggedFrom = square;
-        _dragPosition = details.localPosition;
-        _draggedPiece = piece;
-      });
+      _dragState.value = _DragState(
+        fromSquare: square,
+        position: details.localPosition,
+        piece: piece,
+      );
       
       if (widget.useExternalState) {
         widget.onSquareTap?.call(square);
@@ -340,24 +370,25 @@ class _ChessBoardState extends ConsumerState<ChessBoard> {
   }
 
   void _onDragUpdate(DragUpdateDetails details) {
-    if (_draggedFrom != null) {
-      setState(() {
-        _dragPosition = details.localPosition;
-      });
+    if (_dragState.value.fromSquare != null) {
+      _dragState.value = _dragState.value.copyWith(
+        position: details.localPosition,
+      );
     }
   }
 
   void _onDragEnd(double squareSize, bool isFlipped) {
-    if (_draggedFrom != null && _dragPosition != null) {
-      final file = (_dragPosition!.dx / squareSize).floor().clamp(0, 7);
-      final rank = (_dragPosition!.dy / squareSize).floor().clamp(0, 7);
+    final state = _dragState.value;
+    if (state.fromSquare != null && state.position != null) {
+      final file = (state.position!.dx / squareSize).floor().clamp(0, 7);
+      final rank = (state.position!.dy / squareSize).floor().clamp(0, 7);
       final targetSquare = _getSquare(file, rank, isFlipped);
 
-      if (targetSquare != _draggedFrom) {
+      if (targetSquare != state.fromSquare) {
         if (widget.useExternalState) {
-          widget.onMove?.call(_draggedFrom!, targetSquare);
+          widget.onMove?.call(state.fromSquare!, targetSquare);
         } else {
-          final success = ref.read(gameProvider.notifier).tryMove(_draggedFrom!, targetSquare);
+          final success = ref.read(gameProvider.notifier).tryMove(state.fromSquare!, targetSquare);
           if (success) {
             widget.onMoveCallback?.call();
           }
@@ -365,11 +396,25 @@ class _ChessBoardState extends ConsumerState<ChessBoard> {
       }
     }
 
-    setState(() {
-      _draggedFrom = null;
-      _dragPosition = null;
-      _draggedPiece = null;
-    });
+    _dragState.value = _DragState.empty();
+  }
+}
+
+class _DragState {
+  final String? fromSquare;
+  final Offset? position;
+  final String? piece;
+
+  const _DragState({this.fromSquare, this.position, this.piece});
+
+  factory _DragState.empty() => const _DragState();
+
+  _DragState copyWith({String? fromSquare, Offset? position, String? piece}) {
+    return _DragState(
+      fromSquare: fromSquare ?? this.fromSquare,
+      position: position ?? this.position,
+      piece: piece ?? this.piece,
+    );
   }
 }
 
@@ -636,4 +681,3 @@ class _ArrowPainter extends CustomPainter {
         isFlipped != oldDelegate.isFlipped;
   }
 }
-
