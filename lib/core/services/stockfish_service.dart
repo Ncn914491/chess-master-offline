@@ -127,15 +127,9 @@ class StockfishService {
     subscription = _outputController.stream.listen((line) {
       // Parse evaluation from info line
       if (line.startsWith('info') && line.contains('score')) {
-        final cpScore = _parseValue(line, ' score cp ');
-        if (cpScore != null) {
-          evaluation = cpScore;
-        }
-
-        final mateScore = _parseValue(line, ' score mate ');
-        if (mateScore != null) {
-          mateIn = mateScore;
-        }
+        final info = _parseInfoLine(line);
+        if (info.cp != null) evaluation = info.cp;
+        if (info.mate != null) mateIn = info.mate;
       }
 
       // Parse best move
@@ -203,20 +197,13 @@ class StockfishService {
     late StreamSubscription subscription;
     subscription = _outputController.stream.listen((line) {
       if (line.startsWith('info') && line.contains(' pv ')) {
-        final pvIndex = line.indexOf(' pv ');
-        if (pvIndex != -1) {
-          // Extract moves (part after ' pv ')
-          // +4 is length of ' pv '
-          final movesStr = line.substring(pvIndex + 4);
-          final moves = movesStr.split(' ');
+        final info = _parseInfoLine(line);
 
-          // Parse other info (part before ' pv ')
-          final infoPart = line.substring(0, pvIndex);
-
-          final pvNumber = _parseValue(infoPart, ' multipv ') ?? 1;
-          final currentDepth = _parseValue(infoPart, ' depth ') ?? 0;
-          final eval = _parseValue(infoPart, ' score cp ');
-          final mate = _parseValue(infoPart, ' score mate ');
+        if (info.moves != null) {
+          final pvNumber = info.multipv ?? 1;
+          final currentDepth = info.depth ?? 0;
+          final eval = info.cp;
+          final mate = info.mate;
 
           // Store the main line evaluation
           if (pvNumber == 1) {
@@ -227,7 +214,7 @@ class StockfishService {
           // Update or add line
           if (lines.length >= pvNumber) {
             lines[pvNumber - 1] = EngineLine(
-              moves: moves,
+              moves: info.moves!,
               evaluation: eval,
               mateIn: mate,
               depth: currentDepth,
@@ -235,7 +222,7 @@ class StockfishService {
           } else {
             lines.add(
               EngineLine(
-                moves: moves,
+                moves: info.moves!,
                 evaluation: eval,
                 mateIn: mate,
                 depth: currentDepth,
@@ -274,6 +261,38 @@ class StockfishService {
         return AnalysisResult(evaluation: 0, lines: [], depth: 0);
       },
     );
+  }
+
+  /// Helper to parse info line efficiently
+  ({int? depth, int? multipv, int? cp, int? mate, List<String>? moves}) _parseInfoLine(String line) {
+    int? depth;
+    int? multipv;
+    int? cp;
+    int? mate;
+    List<String>? moves;
+
+    // Split by space - fast and simple
+    final parts = line.split(' ');
+
+    for (int i = 0; i < parts.length; i++) {
+      final part = parts[i];
+      if (part == 'depth' && i + 1 < parts.length) {
+        depth = int.tryParse(parts[i + 1]);
+      } else if (part == 'multipv' && i + 1 < parts.length) {
+        multipv = int.tryParse(parts[i + 1]);
+      } else if (part == 'score' && i + 2 < parts.length) {
+        if (parts[i + 1] == 'cp') {
+          cp = int.tryParse(parts[i + 2]);
+        } else if (parts[i + 1] == 'mate') {
+          mate = int.tryParse(parts[i + 2]);
+        }
+        i += 2; // Skip next two tokens
+      } else if (part == 'pv') {
+        moves = parts.sublist(i + 1);
+        break; // pv is usually at the end
+      }
+    }
+    return (depth: depth, multipv: multipv, cp: cp, mate: mate, moves: moves);
   }
 
   /// Set the engine skill level (affects playing strength)

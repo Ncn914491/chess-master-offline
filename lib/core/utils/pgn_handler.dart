@@ -4,12 +4,17 @@ import 'package:chess_master/models/game_model.dart';
 class PGNHandler {
   static GameState? parsePgn(String pgn) {
     try {
-      final game = chess.Chess.fromPgn(pgn);
-      if (game == null) return null;
+      final game = chess.Chess();
+      if (!game.load_pgn(pgn)) {
+        return null;
+      }
 
       final moves = <ChessMove>[];
-      for (final move in game.history) {
-        moves.add(ChessMove.fromChessMove(move, game));
+      // game.history returns List<State>
+      for (final state in game.history) {
+        if (state.move != null) {
+          moves.add(ChessMove.fromChessMove(state.move, game));
+        }
       }
 
       return GameState.fromFen(game.fen).copyWith(moveHistory: moves);
@@ -19,7 +24,20 @@ class PGNHandler {
   }
 
   static String exportPgn(GameState gameState) {
-    final game = chess.Chess.fromFEN(gameState.fen);
-    return game.pgn() ?? '';
+    // Replay moves to generate valid PGN
+    final game = chess.Chess();
+
+    for (final move in gameState.moveHistory) {
+      final moveMap = {
+        'from': move.from,
+        'to': move.to,
+      };
+      if (move.promotion != null) {
+        moveMap['promotion'] = move.promotion!;
+      }
+      game.move(moveMap);
+    }
+
+    return game.pgn();
   }
 }

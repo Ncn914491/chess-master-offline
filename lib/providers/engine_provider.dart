@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:chess_master/core/services/stockfish_service.dart';
+import 'package:chess_master/core/services/opening_book_service.dart';
 import 'package:chess_master/core/constants/app_constants.dart';
 
 /// Provider for the Stockfish engine service
@@ -99,6 +100,22 @@ class EngineNotifier extends StateNotifier<EngineState> {
     required DifficultyLevel difficulty,
   }) async {
     state = state.copyWith(isThinking: true);
+
+    // 1. Check Opening Book first
+    final bookMove = OpeningBookService.instance.getMove(fen);
+    if (bookMove != null) {
+      // Simulate thinking time for book move to feel natural
+      final delay = Duration(milliseconds: 500 + (difficulty.thinkTimeMs ~/ 4));
+      await Future.delayed(delay);
+
+      state = state.copyWith(
+        isThinking: false,
+        bestMove: bookMove,
+        evaluation: 0, // Book moves are theoretically roughly equal
+      );
+
+      return BestMoveResult(bestMove: bookMove, evaluation: 0);
+    }
 
     // Initialize if not ready
     if (!_service.isReady) {
