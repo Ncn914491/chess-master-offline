@@ -434,11 +434,10 @@ class BoardPainter extends CustomPainter {
   final String? hintSquare;
   final String? Function(String) getPieceAt;
 
-  // Optimized paints
+  // Optimized reusable paints
   final Paint _squarePaint = Paint();
   final Paint _legalMoveDotPaint = Paint();
   final Paint _legalMoveRingPaint = Paint()..style = PaintingStyle.stroke;
-  final Paint _highlightPaint = Paint();
 
   BoardPainter({
     required this.theme,
@@ -465,6 +464,7 @@ class BoardPainter extends CustomPainter {
     // Update stroke width based on current size
     _legalMoveRingPaint.strokeWidth = squareSize * 0.08;
 
+    // 1. Draw Board Squares
     for (int rank = 0; rank < 8; rank++) {
       for (int file = 0; file < 8; file++) {
         final isLight = (rank + file) % 2 == 0;
@@ -514,19 +514,17 @@ class BoardPainter extends CustomPainter {
           );
 
           if (isCapture) {
-            // Capture indicator - ring
             canvas.drawCircle(center, squareSize * 0.4, _legalMoveRingPaint);
           } else {
-            // Move indicator - dot
             canvas.drawCircle(center, squareSize * 0.15, _legalMoveDotPaint);
           }
         }
-
-        // Draw coordinates
-        if (showCoordinates) {
-          _drawCoordinates(canvas, file, rank, squareSize, isLight);
-        }
       }
+    }
+
+    // 2. Draw Coordinates (Optimized)
+    if (showCoordinates) {
+      _drawCoordinates(canvas, size.width, squareSize);
     }
   }
 
@@ -540,29 +538,28 @@ class BoardPainter extends CustomPainter {
     return '$fileChar$rankChar';
   }
 
-  void _drawCoordinates(Canvas canvas, int file, int rank, double squareSize, bool isLight) {
-    // Only draw on edges
-    final isBottomEdge = isFlipped ? rank == 0 : rank == 7;
-    final isLeftEdge = file == 0;
-
-    if (!isBottomEdge && !isLeftEdge) return;
-
-    final textStyle = TextStyle(
-      color: isLight ? theme.coordinateLight : theme.coordinateDark,
+  void _drawCoordinates(Canvas canvas, double boardWidth, double squareSize) {
+    final textStyleLight = TextStyle(
+      color: theme.coordinateLight,
+      fontSize: squareSize * 0.15,
+      fontWeight: FontWeight.bold,
+    );
+    final textStyleDark = TextStyle(
+      color: theme.coordinateDark,
       fontSize: squareSize * 0.15,
       fontWeight: FontWeight.bold,
     );
 
-    // Draw file letters on bottom row
-    if (isBottomEdge) {
+    // Files (a-h) on bottom edge
+    for (int file = 0; file < 8; file++) {
       final fileLabel = isFlipped
           ? String.fromCharCode('h'.codeUnitAt(0) - file)
           : String.fromCharCode('a'.codeUnitAt(0) + file);
 
-      // We create a new TextPainter here because caching might be premature optimization
-      // without proper cache invalidation, but at least we don't recreate the style unnecessarily?
-      // Actually, standard optimization is to just paint.
-      final textSpan = TextSpan(text: fileLabel, style: textStyle);
+      final isLightSquare = (7 + file) % 2 == 0;
+      final style = isLightSquare ? textStyleLight : textStyleDark;
+
+      final textSpan = TextSpan(text: fileLabel, style: style);
       final textPainter = TextPainter(
         text: textSpan,
         textDirection: TextDirection.ltr,
@@ -572,15 +569,19 @@ class BoardPainter extends CustomPainter {
         canvas,
         Offset(
           file * squareSize + squareSize - textPainter.width - 2,
-          rank * squareSize + squareSize - textPainter.height - 2,
+          boardWidth - textPainter.height - 2,
         ),
       );
     }
 
-    // Draw rank numbers on left column
-    if (isLeftEdge) {
+    // Ranks (1-8) on left edge
+    for (int rank = 0; rank < 8; rank++) {
       final rankLabel = isFlipped ? (rank + 1).toString() : (8 - rank).toString();
-      final textSpan = TextSpan(text: rankLabel, style: textStyle);
+
+      final isLightSquare = (rank + 0) % 2 == 0;
+      final style = isLightSquare ? textStyleLight : textStyleDark;
+
+      final textSpan = TextSpan(text: rankLabel, style: style);
       final textPainter = TextPainter(
         text: textSpan,
         textDirection: TextDirection.ltr,
@@ -651,13 +652,13 @@ class _ArrowPainter extends CustomPainter {
     // Draw arrowhead
     _arrowPaint.color = color;
 
-    final angle = (toPos - fromPos).direction;
-    final arrowSize = squareSize * 0.3;
     final dx = toPos.dx - fromPos.dx;
     final dy = toPos.dy - fromPos.dy;
     final distance = (toPos - fromPos).distance;
 
     if (distance == 0) return;
+
+    final arrowSize = squareSize * 0.3;
 
     // Use pre-allocated path, but reset it
     _arrowPath.reset();

@@ -99,6 +99,9 @@ class EngineNotifier extends StateNotifier<EngineState> {
     required String fen,
     required DifficultyLevel difficulty,
   }) async {
+    // Prevent overlapping thinking
+    if (state.isThinking) return null;
+
     state = state.copyWith(isThinking: true);
 
     // 1. Check Opening Book first
@@ -107,6 +110,8 @@ class EngineNotifier extends StateNotifier<EngineState> {
       // Simulate thinking time for book move to feel natural
       final delay = Duration(milliseconds: 500 + (difficulty.thinkTimeMs ~/ 4));
       await Future.delayed(delay);
+
+      if (!mounted) return null;
 
       state = state.copyWith(
         isThinking: false,
@@ -121,7 +126,7 @@ class EngineNotifier extends StateNotifier<EngineState> {
     if (!_service.isReady) {
       await _service.initialize();
       if (!_service.isReady) {
-        state = state.copyWith(isThinking: false);
+        if (mounted) state = state.copyWith(isThinking: false);
         debugPrint('Engine not ready, skipping move search');
         return null;
       }
@@ -145,7 +150,6 @@ class EngineNotifier extends StateNotifier<EngineState> {
             Duration(milliseconds: difficulty.thinkTimeMs + 2000),
             onTimeout: () {
               debugPrint('Engine timed out');
-              // Return a dummy result or throw exception
               throw TimeoutException('Engine timed out');
             },
           );
@@ -156,6 +160,8 @@ class EngineNotifier extends StateNotifier<EngineState> {
         await Future.delayed(minDelay - elapsed);
       }
 
+      if (!mounted) return null;
+
       state = state.copyWith(
         isThinking: false,
         bestMove: result.bestMove,
@@ -165,7 +171,7 @@ class EngineNotifier extends StateNotifier<EngineState> {
 
       return result;
     } catch (e) {
-      state = state.copyWith(isThinking: false);
+      if (mounted) state = state.copyWith(isThinking: false);
       print('Error getting bot move: $e');
       return null;
     }
@@ -178,11 +184,13 @@ class EngineNotifier extends StateNotifier<EngineState> {
     try {
       final result = await _service.getBestMove(fen: fen, depth: depth);
 
-      state = state.copyWith(isThinking: false, bestMove: result.bestMove);
+      if (mounted) {
+        state = state.copyWith(isThinking: false, bestMove: result.bestMove);
+      }
 
       return result;
     } catch (e) {
-      state = state.copyWith(isThinking: false);
+      if (mounted) state = state.copyWith(isThinking: false);
       print('Error getting hint: $e');
       return null;
     }
@@ -207,7 +215,7 @@ class EngineNotifier extends StateNotifier<EngineState> {
     // Subscribe to progressive updates
     final subscription = _service.analysisStream.listen((result) {
       // Only update if we are still analyzing this FEN
-      if (state.currentFen == fen && state.isAnalyzing) {
+      if (mounted && state.currentFen == fen && state.isAnalyzing) {
         state = state.copyWith(
           evaluation: result.evaluation,
           mateIn: result.mateIn,
@@ -224,18 +232,20 @@ class EngineNotifier extends StateNotifier<EngineState> {
         multiPv: multiPv,
       );
 
-      subscription.cancel();
+      await subscription.cancel();
 
-      state = state.copyWith(
-        isAnalyzing: false,
-        evaluation: result.evaluation,
-        mateIn: result.mateIn,
-        lines: result.lines,
-        depth: result.depth,
-      );
+      if (mounted && state.currentFen == fen && state.isAnalyzing) {
+        state = state.copyWith(
+          isAnalyzing: false,
+          evaluation: result.evaluation,
+          mateIn: result.mateIn,
+          lines: result.lines,
+          depth: result.depth,
+        );
+      }
     } catch (e) {
-      subscription.cancel();
-      state = state.copyWith(isAnalyzing: false);
+      await subscription.cancel();
+      if (mounted) state = state.copyWith(isAnalyzing: false);
       print('Error analyzing position: $e');
     }
   }
@@ -244,14 +254,18 @@ class EngineNotifier extends StateNotifier<EngineState> {
   void stopAnalysis() {
     _service.stopAnalysis();
     _thinkingTimer?.cancel();
-    state = state.copyWith(isAnalyzing: false, isThinking: false);
+    if (mounted) {
+      state = state.copyWith(isAnalyzing: false, isThinking: false);
+    }
   }
 
   /// Reset for new game
   void resetForNewGame() {
     stopAnalysis();
     _service.newGame();
-    state = const EngineState();
+    if (mounted) {
+      state = const EngineState();
+    }
   }
 
   @override
