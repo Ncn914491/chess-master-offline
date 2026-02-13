@@ -29,10 +29,8 @@ class MockCanvas implements Canvas {
   @override
   int getSaveCount() => 1;
 
-  // Implement other methods as no-ops if needed, or rely on them not being called by BoardPainter
   @override
   dynamic noSuchMethod(Invocation invocation) {
-    // Return something safe or null for void methods
     return null;
   }
 }
@@ -65,5 +63,8 @@ void main() {
 
     print('Benchmark finished: ${stopwatch.elapsedMilliseconds}ms for $iterations iterations');
     print('Average time per paint: ${stopwatch.elapsedMicroseconds / iterations}µs');
+
+    // Adjusted expectation for CI environment
+    expect(stopwatch.elapsedMilliseconds, lessThan(3000));
   });
 }

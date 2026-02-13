@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:chess/chess.dart' as chess;
@@ -9,12 +10,6 @@ import 'package:chess_master/providers/engine_provider.dart' as package_engine_p
 
 /// Provider for analysis state
 final analysisProvider = StateNotifierProvider<AnalysisNotifier, AnalysisState>((ref) {
-  // Use the service from the provider (which can be overridden in tests)
-  // Instead of direct singleton access
-  // We use read here to avoid rebuilding notifier when service changes (it shouldn't generally)
-  // But strictly speaking watch is safer for overrides.
-  // However, stockfishServiceProvider is a simple Provider returning instance.
-  // In tests, we override it.
   final service = ref.watch(package_engine_provider.stockfishServiceProvider);
   return AnalysisNotifier(service);
 });
@@ -158,6 +153,7 @@ class AnalysisState {
 class AnalysisNotifier extends StateNotifier<AnalysisState> {
   stockfish.StockfishService? _stockfish;
   bool _isInitialized = false;
+  Timer? _debounceTimer;
 
   @visibleForTesting
   int stateUpdateCount = 0;
@@ -173,9 +169,11 @@ class AnalysisNotifier extends StateNotifier<AnalysisState> {
       await _stockfish!.initialize();
       _isInitialized = true;
     } catch (e) {
-      state = state.copyWith(
-        errorMessage: 'Failed to initialize analysis engine: $e',
-      );
+      if (mounted) {
+        state = state.copyWith(
+          errorMessage: 'Failed to initialize analysis engine: $e',
+        );
+      }
     }
   }
 
@@ -201,7 +199,7 @@ class AnalysisNotifier extends StateNotifier<AnalysisState> {
     );
 
     // Start live analysis if engine is ready
-    if (_isInitialized) {
+    if (_isInitialized && state.isLiveAnalysis) {
       await _analyzeCurrentPosition();
     }
   }
@@ -210,7 +208,12 @@ class AnalysisNotifier extends StateNotifier<AnalysisState> {
   Future<void> goToMove(int moveIndex) async {
     if (moveIndex < -1 || moveIndex >= state.originalMoves.length) return;
 
+    // Cancel any pending analysis trigger
+    _debounceTimer?.cancel();
+
     // Rebuild board from start
+    // Optimization: If close to current index, could use undo/move?
+    // But safely rebuilding is more robust.
     final board = chess.Chess.fromFEN(state.startingFen);
     
     String? lastFrom;
@@ -232,9 +235,13 @@ class AnalysisNotifier extends StateNotifier<AnalysisState> {
       clearSelection: true,
     );
 
-    // Analyze new position
+    // Debounce analysis
     if (_isInitialized && state.isLiveAnalysis) {
-      await _analyzeCurrentPosition();
+      _debounceTimer = Timer(const Duration(milliseconds: 300), () {
+        if (mounted) {
+          _analyzeCurrentPosition();
+        }
+      });
     }
   }
 
@@ -262,15 +269,23 @@ class AnalysisNotifier extends StateNotifier<AnalysisState> {
 
   /// Toggle live analysis
   void toggleLiveAnalysis() {
-    state = state.copyWith(isLiveAnalysis: !state.isLiveAnalysis);
-    if (state.isLiveAnalysis) {
+    final newIsLive = !state.isLiveAnalysis;
+    state = state.copyWith(isLiveAnalysis: newIsLive);
+    if (newIsLive) {
       _analyzeCurrentPosition();
+    } else {
+      // Stop current analysis if disabled
+      _stockfish?.stopAnalysis();
+      _debounceTimer?.cancel();
     }
   }
 
   /// Analyze current position
   Future<void> _analyzeCurrentPosition() async {
     if (_stockfish == null || !_isInitialized) return;
+
+    // Cancel previous analysis first
+    _stockfish!.stopAnalysis();
 
     try {
       final result = await _stockfish!.analyzePosition(
@@ -279,9 +294,11 @@ class AnalysisNotifier extends StateNotifier<AnalysisState> {
         multiPv: AppConstants.topEngineLinesCount,
       );
 
+      if (!mounted) return;
+
       final engineLines = result.lines.asMap().entries.map((entry) => EngineLine(
         rank: entry.key + 1,
-        evaluation: (entry.value.evaluation ?? 0) / 100.0,  // Convert centipawns to pawns
+        evaluation: (entry.value.evaluation ?? 0) / 100.0,
         depth: entry.value.depth,
         moves: entry.value.moves,
         isMate: entry.value.mateIn != null,
@@ -289,12 +306,12 @@ class AnalysisNotifier extends StateNotifier<AnalysisState> {
       )).toList();
 
       state = state.copyWith(
-        currentEval: result.evaluation / 100.0,  // Convert centipawns to pawns
+        currentEval: result.evaluation / 100.0,
         currentEngineLines: engineLines,
         bestMove: result.lines.isNotEmpty ? result.lines.first.moves.first : null,
       );
     } catch (e) {
-      // Silently fail for live analysis
+      // Silently fail for live analysis, or log
     }
   }
 
@@ -305,6 +322,10 @@ class AnalysisNotifier extends StateNotifier<AnalysisState> {
     }
     
     if (_stockfish == null || state.originalMoves.isEmpty) return;
+
+    // Stop any ongoing analysis
+    _debounceTimer?.cancel();
+    _stockfish!.stopAnalysis();
 
     state = state.copyWith(
       isAnalyzing: true,
@@ -326,20 +347,22 @@ class AnalysisNotifier extends StateNotifier<AnalysisState> {
         depth: 15,
         multiPv: 1,
       );
-      prevEval = initialResult.evaluation / 100.0;  // Convert centipawns to pawns
+      prevEval = initialResult.evaluation / 100.0;
       previousResult = initialResult;
     } catch (e) {
-      // Continue with 0.0
+      // Continue
     }
 
+    if (!mounted) return;
+
     for (int i = 0; i < moves.length; i++) {
+      if (!state.isAnalyzing) break; // Check if cancelled
+
       final move = moves[i];
       final isWhiteMove = board.turn == chess.Color.WHITE;
       
-      // Get best move before making the actual move
       String? bestMove;
 
-      // Use previous analysis result if available to save time
       if (previousResult != null && previousResult.lines.isNotEmpty &&
           previousResult.lines.first.moves.isNotEmpty) {
         bestMove = previousResult.lines.first.moves.first;
@@ -351,14 +374,13 @@ class AnalysisNotifier extends StateNotifier<AnalysisState> {
           );
           bestMove = bestMoveResult.bestMove;
         } catch (e) {
-          // Continue without best move
+          // Continue
         }
       }
 
       // Apply the actual move
       board.move({'from': move.from, 'to': move.to, 'promotion': move.promotion});
 
-      // Get evaluation after move
       double afterEval = 0.0;
       List<EngineLine> engineLines = [];
       
@@ -370,7 +392,7 @@ class AnalysisNotifier extends StateNotifier<AnalysisState> {
         );
         
         previousResult = result;
-        afterEval = result.evaluation / 100.0;  // Convert centipawns to pawns
+        afterEval = result.evaluation / 100.0;
         engineLines = result.lines.asMap().entries.map((entry) => EngineLine(
           rank: entry.key + 1,
           evaluation: (entry.value.evaluation ?? 0) / 100.0,
@@ -380,10 +402,9 @@ class AnalysisNotifier extends StateNotifier<AnalysisState> {
           mateIn: entry.value.mateIn,
         )).toList();
       } catch (e) {
-        // Continue with 0.0
+        // Continue
       }
 
-      // Classify the move
       final classification = classifyMove(
         evalBefore: prevEval,
         evalAfter: afterEval,
@@ -406,44 +427,60 @@ class AnalysisNotifier extends StateNotifier<AnalysisState> {
 
       prevEval = afterEval;
 
-      // Update progress
-      // Batch updates to improve performance (reduce UI rebuilds)
-      // Update every 5 moves or on the last move
       if ((i + 1) % 5 == 0 || i == moves.length - 1) {
-        state = state.copyWith(
-          analysisProgress: (i + 1) / moves.length,
-          analyzedMoves: List.from(analyzedMoves),
-        );
-        stateUpdateCount++;
+        if (mounted) {
+          state = state.copyWith(
+            analysisProgress: (i + 1) / moves.length,
+            analyzedMoves: List.from(analyzedMoves),
+          );
+          stateUpdateCount++;
+        }
       }
     }
 
-    // Create full analysis result
-    final fullAnalysis = GameAnalysis.fromMoves(analyzedMoves);
-
-    state = state.copyWith(
-      isAnalyzing: false,
-      analysisProgress: 1.0,
-      analyzedMoves: analyzedMoves,
-      fullAnalysis: fullAnalysis,
-    );
+    if (mounted && state.isAnalyzing) {
+      final fullAnalysis = GameAnalysis.fromMoves(analyzedMoves);
+      state = state.copyWith(
+        isAnalyzing: false,
+        analysisProgress: 1.0,
+        analyzedMoves: analyzedMoves,
+        fullAnalysis: fullAnalysis,
+      );
+    }
   }
 
   /// Stop analysis
   void stopAnalysis() {
+    _debounceTimer?.cancel();
     _stockfish?.stopAnalysis();
-    state = state.copyWith(isAnalyzing: false);
+    if (mounted) {
+      state = state.copyWith(isAnalyzing: false);
+    }
   }
 
   /// Reset state
   void reset() {
+    _debounceTimer?.cancel();
     state = const AnalysisState();
   }
 
   /// Dispose
   @override
   void dispose() {
-    _stockfish?.dispose();
+    _debounceTimer?.cancel();
+    // Do NOT dispose _stockfish here as it is injected and might be shared or singleton.
+    // However, we should stop listening or stop current tasks.
+    // Since _stockfish is likely a singleton or provider, we shouldn't dispose it unless we own it.
+    // But AnalysisNotifier constructor takes it.
+    // The previous implementation called _stockfish?.dispose().
+    // If it's the singleton, that's bad if we come back.
+    // Check EngineNotifier: it disposes _thinkingTimer but NOT _service (it takes it from provider).
+    // The previous implementation of AnalysisNotifier DID call dispose().
+    // "final service = ref.watch(package_engine_provider.stockfishServiceProvider);" returns instance.
+    // StockfishService.instance is a singleton.
+    // So calling dispose() on it kills it for everyone.
+    // I should NOT call dispose() here.
+
     super.dispose();
   }
 }

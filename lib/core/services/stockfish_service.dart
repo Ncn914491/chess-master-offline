@@ -42,7 +42,9 @@ class StockfishService {
 
       // Listen to engine output
       _stockfish!.stdout.listen((line) {
-        _outputController.add(line);
+        if (!_outputController.isClosed) {
+          _outputController.add(line);
+        }
         if (line.contains('uciok')) {
           uciOkReceived = true;
         }
@@ -68,20 +70,18 @@ class StockfishService {
       _configureEngine();
     } catch (e) {
       // Engine initialization failed - this is acceptable for basic gameplay
-      // Games can still be played without engine (local multiplayer, manual analysis)
       debugPrint('Stockfish engine initialization failed: $e');
-      debugPrint('Games can still be played in local multiplayer mode');
       _isReady = false;
-      // Don't rethrow - allow app to continue without engine
     }
   }
 
   /// Configure engine options for optimal mobile performance
   void _configureEngine() {
-    // Limit threads for mobile
-    _sendCommand('setoption name Threads value 2');
-    // Limit hash table size
-    _sendCommand('setoption name Hash value 64');
+    // Determine threads based on platform capabilities if possible, but default to safe values
+    // Most modern phones have at least 4-8 cores. 2-4 threads is usually safe.
+    _sendCommand('setoption name Threads value 4');
+    // increased hash size for better performance on modern devices
+    _sendCommand('setoption name Hash value 128');
     // Enable skill level control
     _sendCommand('setoption name UCI_LimitStrength value true');
   }
@@ -110,9 +110,6 @@ class StockfishService {
   }
 
   /// Get the best move for a given position
-  /// [fen] - Position in FEN notation
-  /// [depth] - Search depth (1-22)
-  /// [thinkTimeMs] - Optional think time limit in milliseconds
   Future<BestMoveResult> getBestMove({
     required String fen,
     required int depth,
@@ -133,6 +130,7 @@ class StockfishService {
       // Parse evaluation from info line
       if (line.startsWith('info') && line.contains('score')) {
         final info = _parseInfoLine(line);
+        // Only update if not null
         if (info.cp != null) evaluation = info.cp;
         if (info.mate != null) mateIn = info.mate;
       }
@@ -148,14 +146,16 @@ class StockfishService {
         }
 
         subscription.cancel();
-        completer.complete(
-          BestMoveResult(
-            bestMove: bestMove ?? '',
-            ponderMove: ponderMove,
-            evaluation: evaluation,
-            mateIn: mateIn,
-          ),
-        );
+        if (!completer.isCompleted) {
+          completer.complete(
+            BestMoveResult(
+              bestMove: bestMove ?? '',
+              ponderMove: ponderMove,
+              evaluation: evaluation,
+              mateIn: mateIn,
+            ),
+          );
+        }
       }
     });
 
@@ -169,7 +169,6 @@ class StockfishService {
       _sendCommand('go depth $depth');
     }
 
-    // Timeout after 30 seconds
     return completer.future.timeout(
       const Duration(seconds: 30),
       onTimeout: () {
@@ -181,8 +180,6 @@ class StockfishService {
   }
 
   /// Analyze a position and get multiple lines
-  /// Returns evaluation and top engine lines
-  /// Also emits intermediate results to [analysisStream]
   Future<AnalysisResult> analyzePosition({
     required String fen,
     int depth = AppConstants.analysisDepth,
@@ -193,8 +190,7 @@ class StockfishService {
     }
 
     final completer = Completer<AnalysisResult>();
-    final lines = <EngineLine>[];
-    // Keep track of latest evaluations for each line to construct partial results
+    // Initialize lines with empty/null placeholders if needed, or just use a map
     final currentLines = <int, EngineLine>{};
 
     int? mainEvaluation;
@@ -208,16 +204,16 @@ class StockfishService {
       if (line.startsWith('info') && line.contains(' pv ')) {
         final info = _parseInfoLine(line);
 
-        if (info.moves != null) {
+        if (info.moves != null && info.moves!.isNotEmpty) {
           final pvNumber = info.multipv ?? 1;
           final currentDepth = info.depth ?? 0;
           final eval = info.cp;
           final mate = info.mate;
 
-          // Store the main line evaluation
+          // Store the main line evaluation (multipv 1 is usually the best move)
           if (pvNumber == 1) {
-            mainEvaluation = eval;
-            mateIn = mate;
+            if (eval != null) mainEvaluation = eval;
+            if (mate != null) mateIn = mate;
           }
 
           final engineLine = EngineLine(
@@ -227,29 +223,19 @@ class StockfishService {
             depth: currentDepth,
           );
 
-          // Update lines map
           currentLines[pvNumber] = engineLine;
 
-          // Update final list (for legacy compatibility)
-          if (lines.length >= pvNumber) {
-            lines[pvNumber - 1] = engineLine;
-          } else {
-            lines.add(engineLine);
-          }
-
           // Emit progressive update
-          _analysisStreamController.add(
-            AnalysisResult(
-              evaluation: mainEvaluation ?? 0,
-              mateIn: mateIn,
-              lines: currentLines.values.toList()..sort((a, b) {
-                // Heuristic sort based on evaluation if available, otherwise keep order
-                // But typically multipv comes in order 1..N
-                return 0;
-              }),
-              depth: currentDepth,
-            )
-          );
+          if (!_analysisStreamController.isClosed) {
+            _analysisStreamController.add(
+              AnalysisResult(
+                evaluation: mainEvaluation ?? 0,
+                mateIn: mateIn,
+                lines: _getSortedLines(currentLines),
+                depth: currentDepth,
+              )
+            );
+          }
         }
       }
 
@@ -258,14 +244,16 @@ class StockfishService {
         // Reset MultiPV to 1
         _sendCommand('setoption name MultiPV value 1');
 
-        completer.complete(
-          AnalysisResult(
-            evaluation: mainEvaluation ?? 0,
-            mateIn: mateIn,
-            lines: lines,
-            depth: depth,
-          ),
-        );
+        if (!completer.isCompleted) {
+          completer.complete(
+            AnalysisResult(
+              evaluation: mainEvaluation ?? 0,
+              mateIn: mateIn,
+              lines: _getSortedLines(currentLines),
+              depth: depth,
+            ),
+          );
+        }
       }
     });
 
@@ -279,12 +267,21 @@ class StockfishService {
         subscription.cancel();
         _sendCommand('stop');
         _sendCommand('setoption name MultiPV value 1');
-        return AnalysisResult(evaluation: mainEvaluation ?? 0, lines: lines, depth: 0);
+        return AnalysisResult(
+          evaluation: mainEvaluation ?? 0,
+          lines: _getSortedLines(currentLines),
+          depth: 0
+        );
       },
     );
   }
 
-  /// Helper to parse info line efficiently using indexOf
+  List<EngineLine> _getSortedLines(Map<int, EngineLine> linesMap) {
+    final sortedKeys = linesMap.keys.toList()..sort();
+    return sortedKeys.map((k) => linesMap[k]!).toList();
+  }
+
+  /// Optimized info line parser
   ({int? depth, int? multipv, int? cp, int? mate, List<String>? moves}) _parseInfoLine(String line) {
     int? depth;
     int? multipv;
@@ -292,43 +289,39 @@ class StockfishService {
     int? mate;
     List<String>? moves;
 
-    // Optimized parsing using indexOf and substring
-    // Keys usually have spaces around them
+    // Helper for fast parsing without substrings for keys
+    int? parseValue(String key) {
+      final keyIndex = line.indexOf(key);
+      if (keyIndex == -1) return null;
 
-    // Depth
-    depth = _parseValue(line, ' depth ');
+      final valStart = keyIndex + key.length;
+      // find next space
+      int valEnd = line.indexOf(' ', valStart);
+      if (valEnd == -1) valEnd = line.length;
 
-    // MultiPV
-    multipv = _parseValue(line, ' multipv ');
+      return int.tryParse(line.substring(valStart, valEnd));
+    }
 
-    // Score
-    cp = _parseValue(line, ' score cp ');
-    mate = _parseValue(line, ' score mate ');
+    depth = parseValue('depth ');
+    multipv = parseValue('multipv ');
+    cp = parseValue('cp ');
+    mate = parseValue('mate ');
 
-    // PV moves
+    // Parse PV moves
+    // " pv " is usually at the end, but technically could be anywhere?
+    // Standard UCI: pv move1 move2 ...
     final pvIndex = line.indexOf(' pv ');
     if (pvIndex != -1) {
-      final movesStr = line.substring(pvIndex + 4);
-      // split is still okay for moves list as it's the end of line and not too long
+      final movesStart = pvIndex + 4;
+      final movesStr = line.substring(movesStart);
+      // split is fine here as it's just the moves part
       moves = movesStr.split(' ');
     }
 
     return (depth: depth, multipv: multipv, cp: cp, mate: mate, moves: moves);
   }
 
-  /// Helper to parse integer value after a key
-  int? _parseValue(String text, String key) {
-    final index = text.indexOf(key);
-    if (index != -1) {
-      final start = index + key.length;
-      int end = text.indexOf(' ', start);
-      if (end == -1) end = text.length;
-      return int.tryParse(text.substring(start, end));
-    }
-    return null;
-  }
-
-  /// Set the engine skill level (affects playing strength)
+  /// Set the engine skill level
   void setSkillLevel(int elo) {
     _sendCommand('setoption name UCI_Elo value $elo');
   }
@@ -367,7 +360,6 @@ class BestMoveResult {
     this.mateIn,
   });
 
-  /// Parse UCI move format (e.g., "e2e4") to from/to squares
   (String from, String to, String? promotion) get parsedMove {
     if (bestMove.length < 4) return ('', '', null);
 
@@ -395,10 +387,8 @@ class AnalysisResult {
     required this.depth,
   });
 
-  /// Get evaluation in pawns (centipawns / 100)
   double get evalInPawns => evaluation / 100.0;
 
-  /// Get formatted evaluation string
   String get formattedEval {
     if (mateIn != null) {
       return mateIn! > 0 ? 'M$mateIn' : '-M${mateIn!.abs()}';
@@ -422,10 +412,8 @@ class EngineLine {
     required this.depth,
   });
 
-  /// Get evaluation in pawns
   double get evalInPawns => (evaluation ?? 0) / 100.0;
 
-  /// Get formatted evaluation string
   String get formattedEval {
     if (mateIn != null) {
       return mateIn! > 0 ? 'M$mateIn' : '-M${mateIn!.abs()}';
