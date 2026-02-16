@@ -18,8 +18,8 @@ jobs:
 
     env:
       # Offset to ensure version codes exceed any previously uploaded ones.
-      # Setting to 10 to ensure we start double-digits (e.g. 11, 12) to avoid conflicts with 1-5.
-      VERSION_CODE_OFFSET: 10
+      # Setting to 3 to start from version code 4, 5, 6, etc.
+      VERSION_CODE_OFFSET: 3
       # Major.Minor prefix for versionName (versionName = VERSION_PREFIX.BUILD_NUMBER)
       VERSION_PREFIX: '1.0'
 
@@ -88,12 +88,25 @@ jobs:
       # ════════════════════════════════════════════════════════════════════════════════
       - name: Decode Android Keystore
         run: |
-          echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 --decode > android/app/keystore.jks
+          echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 --decode > android/app/upload-keystore.jks
           echo "Keystore decoded successfully"
-          ls -la android/app/keystore.jks
+          ls -la android/app/upload-keystore.jks
 
       # ════════════════════════════════════════════════════════════════════════════════
-      # 8. Build Release AAB
+      # 8. Create key.properties file
+      # ════════════════════════════════════════════════════════════════════════════════
+      - name: Create key.properties
+        run: |
+          cat > android/key.properties << EOF
+          storePassword=${{ secrets.KEYSTORE_PASSWORD }}
+          keyPassword=${{ secrets.KEY_PASSWORD }}
+          keyAlias=${{ secrets.KEY_ALIAS }}
+          storeFile=app/upload-keystore.jks
+          EOF
+          echo "key.properties created successfully"
+
+      # ════════════════════════════════════════════════════════════════════════════════
+      # 9. Build Release AAB
       # ════════════════════════════════════════════════════════════════════════════════
       - name: Compute Version
         id: version
@@ -119,11 +132,6 @@ jobs:
           echo "Computed versionName: $VERSION_NAME"
 
       - name: Build Release AAB
-        env:
-          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
-          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
-          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
-          KEYSTORE_FILE: app/keystore.jks
         run: |
           echo "Building AAB — versionCode=${{ steps.version.outputs.BUILD_NUMBER }}, versionName=${{ steps.version.outputs.VERSION_NAME }}"
           flutter build appbundle --release \
@@ -131,7 +139,7 @@ jobs:
             --build-name=${{ steps.version.outputs.VERSION_NAME }}
 
       # ════════════════════════════════════════════════════════════════════════════════
-      # 9. Upload AAB as build artifact (for debugging)
+      # 10. Upload AAB as build artifact (for debugging)
       # ════════════════════════════════════════════════════════════════════════════════
       - name: Upload AAB artifact
         uses: actions/upload-artifact@v4
@@ -141,7 +149,7 @@ jobs:
           retention-days: 30
 
       # ════════════════════════════════════════════════════════════════════════════════
-      # 10. Deploy to Google Play Internal Track
+      # 11. Deploy to Google Play Internal Track
       # ════════════════════════════════════════════════════════════════════════════════
       - name: Deploy to Google Play (Internal Testing)
         uses: r0adkll/upload-google-play@v1
@@ -155,7 +163,7 @@ jobs:
         continue-on-error: false
 
       # ════════════════════════════════════════════════════════════════════════════════
-      # 11. Post-deploy summary
+      # 12. Post-deploy summary
       # ════════════════════════════════════════════════════════════════════════════════
       - name: Deployment Summary
         if: success()
