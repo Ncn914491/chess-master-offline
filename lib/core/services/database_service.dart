@@ -6,7 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 class DatabaseService {
   static DatabaseService? _instance;
   Database? _database;
-  
+
   static DatabaseService get instance {
     _instance ??= DatabaseService._();
     return _instance!;
@@ -23,15 +23,20 @@ class DatabaseService {
 
   /// Initialize the database
   Future<Database> _initDatabase() async {
-    final dbPath = await getDatabasesPath();
-    final path = join(dbPath, 'chess_master.db');
+    try {
+      final dbPath = await getDatabasesPath();
+      final path = join(dbPath, 'chess_master.db');
 
-    return await openDatabase(
-      path,
-      version: 1,
-      onCreate: _onCreate,
-      onUpgrade: _onUpgrade,
-    );
+      return await openDatabase(
+        path,
+        version: 1,
+        onCreate: _onCreate,
+        onUpgrade: _onUpgrade,
+      );
+    } catch (e) {
+      print('Database initialization error: $e');
+      rethrow;
+    }
   }
 
   /// Create database tables
@@ -63,7 +68,9 @@ class DatabaseService {
     ''');
 
     // Create indexes
-    await db.execute('CREATE INDEX idx_games_created ON games(created_at DESC)');
+    await db.execute(
+      'CREATE INDEX idx_games_created ON games(created_at DESC)',
+    );
     await db.execute('CREATE INDEX idx_games_saved ON games(is_saved)');
     await db.execute('CREATE INDEX idx_games_completed ON games(is_completed)');
 
@@ -119,7 +126,40 @@ class DatabaseService {
 
   /// Handle database upgrades
   Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
-    // Handle future migrations
+    print('Upgrading database from version $oldVersion to $newVersion');
+
+    // Handle migrations between versions
+    for (int version = oldVersion + 1; version <= newVersion; version++) {
+      await _migrateToVersion(db, version);
+    }
+  }
+
+  /// Migrate database to specific version
+  Future<void> _migrateToVersion(Database db, int version) async {
+    switch (version) {
+      case 1:
+        // Initial version - tables should already be created by onCreate
+        // But if we're upgrading from a version without tables, create them
+        await _createTablesIfNotExist(db);
+        break;
+      // Add future migrations here
+      // case 2:
+      //   await db.execute('ALTER TABLE games ADD COLUMN new_column TEXT');
+      //   break;
+    }
+  }
+
+  /// Create tables if they don't exist (for migrations from version 0)
+  Future<void> _createTablesIfNotExist(Database db) async {
+    // Check if statistics table exists
+    final tables = await db.rawQuery(
+      "SELECT name FROM sqlite_master WHERE type='table' AND name='statistics'",
+    );
+
+    if (tables.isEmpty) {
+      print('Creating missing tables during migration...');
+      await _onCreate(db, 1);
+    }
   }
 
   // ==================== GAME OPERATIONS ====================
@@ -165,10 +205,10 @@ class DatabaseService {
     int? offset,
   }) async {
     final db = await database;
-    
+
     String? where;
     List<dynamic>? whereArgs;
-    
+
     if (savedOnly && completedOnly) {
       where = 'is_saved = 1 AND is_completed = 1';
     } else if (savedOnly) {
@@ -190,11 +230,7 @@ class DatabaseService {
   /// Get recent games
   Future<List<Map<String, dynamic>>> getRecentGames({int limit = 10}) async {
     final db = await database;
-    return await db.query(
-      'games',
-      orderBy: 'updated_at DESC',
-      limit: limit,
-    );
+    return await db.query('games', orderBy: 'updated_at DESC', limit: limit);
   }
 
   /// Get the most recent unfinished game
@@ -212,11 +248,7 @@ class DatabaseService {
   /// Delete a game
   Future<void> deleteGame(String id) async {
     final db = await database;
-    await db.delete(
-      'games',
-      where: 'id = ?',
-      whereArgs: [id],
-    );
+    await db.delete('games', where: 'id = ?', whereArgs: [id]);
   }
 
   /// Delete all games
@@ -234,10 +266,7 @@ class DatabaseService {
     return await db.query(
       'games',
       where: 'created_at >= ? AND created_at <= ?',
-      whereArgs: [
-        start.millisecondsSinceEpoch,
-        end.millisecondsSinceEpoch,
-      ],
+      whereArgs: [start.millisecondsSinceEpoch, end.millisecondsSinceEpoch],
       orderBy: 'created_at DESC',
     );
   }
@@ -256,20 +285,22 @@ class DatabaseService {
   // ==================== ANALYSIS OPERATIONS ====================
 
   /// Save analysis result
-  Future<void> saveAnalysis(String gameId, String fen, String moves, String analysisJson, int depth) async {
+  Future<void> saveAnalysis(
+    String gameId,
+    String fen,
+    String moves,
+    String analysisJson,
+    int depth,
+  ) async {
     final db = await database;
-    await db.insert(
-      'analysis_cache',
-      {
-        'game_id': gameId,
-        'fen': fen,
-        'moves': moves,
-        'analysis_json': analysisJson,
-        'engine_depth': depth,
-        'analyzed_at': DateTime.now().millisecondsSinceEpoch,
-      },
-      conflictAlgorithm: ConflictAlgorithm.replace,
-    );
+    await db.insert('analysis_cache', {
+      'game_id': gameId,
+      'fen': fen,
+      'moves': moves,
+      'analysis_json': analysisJson,
+      'engine_depth': depth,
+      'analyzed_at': DateTime.now().millisecondsSinceEpoch,
+    }, conflictAlgorithm: ConflictAlgorithm.replace);
   }
 
   /// Get analysis result
@@ -288,19 +319,34 @@ class DatabaseService {
 
   /// Get statistics
   Future<Map<String, dynamic>?> getStatistics() async {
-    final db = await database;
-    final results = await db.query('statistics', where: 'id = 1');
-    return results.isNotEmpty ? results.first : null;
+    try {
+      final db = await database;
+      final results = await db.query('statistics', where: 'id = 1');
+      return results.isNotEmpty ? results.first : null;
+    } catch (e) {
+      print('Error getting statistics: $e');
+      // Return default statistics if table doesn't exist
+      return {
+        'id': 1,
+        'total_games': 0,
+        'wins': 0,
+        'losses': 0,
+        'draws': 0,
+        'puzzles_solved': 0,
+        'puzzles_attempted': 0,
+        'current_puzzle_rating': 1200,
+        'last_updated': DateTime.now().millisecondsSinceEpoch,
+      };
+    }
   }
 
   /// Update statistics
   Future<void> updateStatistics(Map<String, dynamic> updates) async {
     final db = await database;
-    await db.update(
-      'statistics',
-      {...updates, 'last_updated': DateTime.now().millisecondsSinceEpoch},
-      where: 'id = 1',
-    );
+    await db.update('statistics', {
+      ...updates,
+      'last_updated': DateTime.now().millisecondsSinceEpoch,
+    }, where: 'id = 1');
   }
 
   /// Increment game count
