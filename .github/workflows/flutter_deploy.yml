@@ -14,6 +14,14 @@ jobs:
   build-and-deploy:
     name: Build & Deploy AAB
     runs-on: ubuntu-latest
+
+    env:
+      # Offset to ensure version codes exceed any previously uploaded ones.
+      # You've already uploaded 5 versions, so offset=5 ensures run_number 2 -> versionCode 7.
+      # Adjust this if you get "Version code already used" errors.
+      VERSION_CODE_OFFSET: 5
+      # Major.Minor prefix for versionName (versionName = VERSION_PREFIX.BUILD_NUMBER)
+      VERSION_PREFIX: '1.0'
     
     steps:
       # ───────────────────────────────────────────────
@@ -87,16 +95,26 @@ jobs:
       # ───────────────────────────────────────────────
       # 8. Build Release AAB
       # ───────────────────────────────────────────────
+      - name: Compute Version
+        id: version
+        run: |
+          BUILD_NUMBER=$(( ${{ github.run_number }} + ${{ env.VERSION_CODE_OFFSET }} ))
+          VERSION_NAME="${{ env.VERSION_PREFIX }}.$BUILD_NUMBER"
+          echo "BUILD_NUMBER=$BUILD_NUMBER" >> $GITHUB_OUTPUT
+          echo "VERSION_NAME=$VERSION_NAME" >> $GITHUB_OUTPUT
+          echo "Computed versionCode: $BUILD_NUMBER | versionName: $VERSION_NAME"
+
       - name: Build Release AAB
         env:
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
           KEYSTORE_FILE: app/keystore.jks
-          GITHUB_RUN_NUMBER: ${{ github.run_number }}
         run: |
-          echo "Building AAB with versionCode=${{ github.run_number }}"
-          flutter build appbundle --release --build-number=${{ github.run_number }}
+          echo "Building AAB — versionCode=${{ steps.version.outputs.BUILD_NUMBER }}, versionName=${{ steps.version.outputs.VERSION_NAME }}"
+          flutter build appbundle --release \
+            --build-number=${{ steps.version.outputs.BUILD_NUMBER }} \
+            --build-name=${{ steps.version.outputs.VERSION_NAME }}
 
       # ───────────────────────────────────────────────
       # 9. Upload AAB as build artifact (for debugging)
@@ -104,7 +122,7 @@ jobs:
       - name: Upload AAB artifact
         uses: actions/upload-artifact@v4
         with:
-          name: release-aab-${{ github.run_number }}
+          name: release-aab-v${{ steps.version.outputs.VERSION_NAME }}
           path: build/app/outputs/bundle/release/app-release.aab
           retention-days: 30
 
@@ -135,6 +153,7 @@ jobs:
           echo "| **App** | ChessMaster Offline |" >> $GITHUB_STEP_SUMMARY
           echo "| **Package** | com.karna.chessmaster |" >> $GITHUB_STEP_SUMMARY
           echo "| **Track** | Internal Testing |" >> $GITHUB_STEP_SUMMARY
-          echo "| **Build Number** | ${{ github.run_number }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Version Name** | ${{ steps.version.outputs.VERSION_NAME }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Version Code** | ${{ steps.version.outputs.BUILD_NUMBER }} |" >> $GITHUB_STEP_SUMMARY
           echo "| **Commit** | ${{ github.sha }} |" >> $GITHUB_STEP_SUMMARY
           echo "| **Triggered by** | ${{ github.actor }} |" >> $GITHUB_STEP_SUMMARY
