@@ -499,7 +499,29 @@ class GameNotifier extends StateNotifier<GameState> {
     if (piece == null) return null;
 
     final color = piece.color == chess.Color.WHITE ? 'w' : 'b';
-    final type = piece.type.name.toUpperCase();
+    String type;
+    switch (piece.type) {
+      case chess.PieceType.PAWN:
+        type = 'P';
+        break;
+      case chess.PieceType.KNIGHT:
+        type = 'N';
+        break;
+      case chess.PieceType.BISHOP:
+        type = 'B';
+        break;
+      case chess.PieceType.ROOK:
+        type = 'R';
+        break;
+      case chess.PieceType.QUEEN:
+        type = 'Q';
+        break;
+      case chess.PieceType.KING:
+        type = 'K';
+        break;
+      default:
+        type = 'P';
+    }
     return '$color$type';
   }
 

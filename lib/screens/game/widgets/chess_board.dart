@@ -327,7 +327,30 @@ class _ChessBoardState extends ConsumerState<ChessBoard> {
       final piece = _externalBoard!.get(square);
       if (piece == null) return null;
       final colorPrefix = piece.color == chess.Color.WHITE ? 'w' : 'b';
-      final pieceChar = piece.type.name.toUpperCase();
+      
+      String pieceChar;
+      switch (piece.type) {
+        case chess.PieceType.PAWN:
+          pieceChar = 'P';
+          break;
+        case chess.PieceType.KNIGHT:
+          pieceChar = 'N';
+          break;
+        case chess.PieceType.BISHOP:
+          pieceChar = 'B';
+          break;
+        case chess.PieceType.ROOK:
+          pieceChar = 'R';
+          break;
+        case chess.PieceType.QUEEN:
+          pieceChar = 'Q';
+          break;
+        case chess.PieceType.KING:
+          pieceChar = 'K';
+          break;
+        default:
+          pieceChar = 'P';
+      }
       return '$colorPrefix$pieceChar';
     } else {
       return ref.read(gameProvider.notifier).getPieceAt(square);

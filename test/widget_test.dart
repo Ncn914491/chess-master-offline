@@ -16,6 +16,7 @@ import 'dart:async';
 // Mock Stockfish Service
 class MockStockfishService implements StockfishService {
   final _analysisController = StreamController<AnalysisResult>.broadcast();
+  final _infoController = StreamController<AnalysisInfo>.broadcast();
 
   @override
   bool get isReady => true;
@@ -25,6 +26,9 @@ class MockStockfishService implements StockfishService {
 
   @override
   Stream<AnalysisResult> get analysisStream => _analysisController.stream;
+
+  @override
+  Stream<AnalysisInfo> get infoStream => _infoController.stream;
 
   @override
   Future<void> initialize() async {}

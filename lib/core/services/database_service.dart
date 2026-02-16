@@ -29,7 +29,7 @@ class DatabaseService {
 
     return await openDatabase(
       path,
-      version: 2,
+      version: 3,
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
     );
@@ -39,7 +39,7 @@ class DatabaseService {
   Future<void> _onCreate(Database db, int version) async {
     // Games table
     await db.execute('''
-      CREATE TABLE games (
+      CREATE TABLE IF NOT EXISTS games (
         id TEXT PRIMARY KEY,
         name TEXT,
         pgn TEXT NOT NULL,
@@ -65,14 +65,14 @@ class DatabaseService {
 
     // Create indexes
     await db.execute(
-      'CREATE INDEX idx_games_created ON games(created_at DESC)',
+      'CREATE INDEX IF NOT EXISTS idx_games_created ON games(created_at DESC)',
     );
-    await db.execute('CREATE INDEX idx_games_saved ON games(is_saved)');
-    await db.execute('CREATE INDEX idx_games_completed ON games(is_completed)');
+    await db.execute('CREATE INDEX IF NOT EXISTS idx_games_saved ON games(is_saved)');
+    await db.execute('CREATE INDEX IF NOT EXISTS idx_games_completed ON games(is_completed)');
 
     // Statistics table (single row)
     await db.execute('''
-      CREATE TABLE statistics (
+      CREATE TABLE IF NOT EXISTS statistics (
         id INTEGER PRIMARY KEY CHECK (id = 1),
         total_games INTEGER DEFAULT 0,
         wins INTEGER DEFAULT 0,
@@ -87,19 +87,15 @@ class DatabaseService {
       )
     ''');
 
-    // Insert default statistics row
-    await db.insert('statistics', {
-      'id': 1,
-      'total_games': 0,
-      'wins': 0,
-      'losses': 0,
-      'draws': 0,
-      'last_updated': DateTime.now().millisecondsSinceEpoch,
-    });
+    // Insert default statistics row if not exists
+    await db.execute('''
+      INSERT OR IGNORE INTO statistics (id, total_games, wins, losses, draws, last_updated)
+      VALUES (1, 0, 0, 0, 0, ${DateTime.now().millisecondsSinceEpoch})
+    ''');
 
     // Puzzles table
     await db.execute('''
-      CREATE TABLE puzzles (
+      CREATE TABLE IF NOT EXISTS puzzles (
         id INTEGER PRIMARY KEY,
         fen TEXT,
         moves TEXT,
@@ -110,11 +106,11 @@ class DatabaseService {
     ''');
 
     // Index on rating for fast lookup
-    await db.execute('CREATE INDEX idx_puzzles_rating ON puzzles(rating)');
+    await db.execute('CREATE INDEX IF NOT EXISTS idx_puzzles_rating ON puzzles(rating)');
 
     // Puzzle progress table
     await db.execute('''
-      CREATE TABLE puzzle_progress (
+      CREATE TABLE IF NOT EXISTS puzzle_progress (
         puzzle_id INTEGER PRIMARY KEY,
         attempts INTEGER DEFAULT 0,
         solved INTEGER DEFAULT 0,
@@ -124,7 +120,7 @@ class DatabaseService {
 
     // Analysis cache table
     await db.execute('''
-      CREATE TABLE analysis_cache (
+      CREATE TABLE IF NOT EXISTS analysis_cache (
         game_id TEXT PRIMARY KEY,
         fen TEXT NOT NULL,
         moves TEXT NOT NULL,
@@ -153,6 +149,11 @@ class DatabaseService {
       await db.execute(
         'CREATE INDEX IF NOT EXISTS idx_puzzles_rating ON puzzles(rating)',
       );
+    }
+    
+    if (oldVersion < 3) {
+      // Ensure all tables exist (fix for missing tables issue)
+      await _onCreate(db, newVersion);
     }
   }
 

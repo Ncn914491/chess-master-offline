@@ -140,7 +140,29 @@ class PuzzleGameState {
     if (piece == null) return null;
 
     final colorPrefix = piece.color == chess.Color.WHITE ? 'w' : 'b';
-    final pieceChar = piece.type.name.toUpperCase();
+    String pieceChar;
+    switch (piece.type) {
+      case chess.PieceType.PAWN:
+        pieceChar = 'P';
+        break;
+      case chess.PieceType.KNIGHT:
+        pieceChar = 'N';
+        break;
+      case chess.PieceType.BISHOP:
+        pieceChar = 'B';
+        break;
+      case chess.PieceType.ROOK:
+        pieceChar = 'R';
+        break;
+      case chess.PieceType.QUEEN:
+        pieceChar = 'Q';
+        break;
+      case chess.PieceType.KING:
+        pieceChar = 'K';
+        break;
+      default:
+        pieceChar = 'P';
+    }
     return '$colorPrefix$pieceChar';
   }
 
@@ -549,13 +571,13 @@ class PuzzleNotifier extends StateNotifier<PuzzleGameState> {
 
     // Update database
     final db = _ref.read(databaseServiceProvider);
+    final currentStats = await db.getStatistics();
+    final currentAttempted = (currentStats?['puzzles_attempted'] as int?) ?? 0;
+    final currentSolved = (currentStats?['puzzles_solved'] as int?) ?? 0;
     await db.updateStatistics({
       'current_puzzle_rating': newRating,
-      'puzzles_attempted':
-          (await db.getStatistics())?['puzzles_attempted'] ?? 0 + 1,
-      if (solved)
-        'puzzles_solved':
-            (await db.getStatistics())?['puzzles_solved'] ?? 0 + 1,
+      'puzzles_attempted': currentAttempted + 1,
+      if (solved) 'puzzles_solved': currentSolved + 1,
     });
   }
 

@@ -93,8 +93,9 @@ class StockfishService {
   /// Configure engine options for optimal mobile performance
   void _configureEngine() {
     _sendCommand('setoption name Threads value 2');
-    _sendCommand('setoption name Hash value 64');
+    _sendCommand('setoption name Hash value 128');
     _sendCommand('setoption name UCI_LimitStrength value true');
+    _sendCommand('setoption name Ponder value false');
   }
 
   /// Wait for engine to be ready

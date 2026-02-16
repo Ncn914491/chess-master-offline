@@ -9,6 +9,7 @@ import 'package:chess_master/providers/engine_provider.dart';
 import 'package:chess_master/screens/game/game_screen.dart';
 import 'package:chess_master/screens/history/game_history_screen.dart';
 import 'package:chess_master/core/utils/pgn_handler.dart';
+import 'package:chess_master/screens/settings/settings_screen.dart';
 
 /// Home screen - main tab for starting games
 class HomeScreen extends ConsumerStatefulWidget {
@@ -100,22 +101,42 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           ),
         ),
         const SizedBox(width: 16),
-        Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'Play Chess',
-              style: Theme.of(
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Play Chess',
+                style: Theme.of(
+                  context,
+                ).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold),
+              ),
+              Text(
+                'Choose your game mode',
+                style: Theme.of(
+                  context,
+                ).textTheme.bodyMedium?.copyWith(
+                  color: AppTheme.textSecondary,
+                ),
+              ),
+            ],
+          ),
+        ),
+        Container(
+          decoration: BoxDecoration(
+            color: AppTheme.cardDark,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: AppTheme.surfaceDark),
+          ),
+          child: IconButton(
+            icon: const Icon(Icons.settings_outlined, color: Colors.white),
+            onPressed: () {
+              Navigator.push(
                 context,
-              ).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold),
-            ),
-            Text(
-              'Choose your game mode',
-              style: Theme.of(
-                context,
-              ).textTheme.bodyMedium?.copyWith(color: AppTheme.textSecondary),
-            ),
-          ],
+                MaterialPageRoute(builder: (context) => const SettingsScreen()),
+              );
+            },
+          ),
         ),
       ],
     );

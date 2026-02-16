@@ -286,12 +286,43 @@ class AnalysisNotifier extends StateNotifier<AnalysisState> {
     if (_stockfish == null || !_isInitialized) return;
 
     try {
+      // Subscribe to live analysis updates
+      final subscription = _stockfish!.analysisStream.listen((result) {
+        final engineLines =
+            result.lines
+                .asMap()
+                .entries
+                .map(
+                  (entry) => EngineLine(
+                    rank: entry.key + 1,
+                    evaluation: (entry.value.evaluation ?? 0) / 100.0,
+                    depth: entry.value.depth,
+                    moves: entry.value.moves,
+                    isMate: entry.value.mateIn != null,
+                    mateIn: entry.value.mateIn,
+                  ),
+                )
+                .toList();
+
+        state = state.copyWith(
+          currentEval: result.evaluation / 100.0,
+          currentEngineLines: engineLines,
+          bestMove:
+              result.lines.isNotEmpty ? result.lines.first.moves.first : null,
+        );
+      });
+
+      // Start analysis
       final result = await _stockfish!.analyzePosition(
         fen: state.fen,
         depth: AppConstants.analysisDepth,
         multiPv: AppConstants.topEngineLinesCount,
       );
 
+      // Cancel subscription when done
+      await subscription.cancel();
+
+      // Final update
       final engineLines =
           result.lines
               .asMap()
@@ -299,9 +330,7 @@ class AnalysisNotifier extends StateNotifier<AnalysisState> {
               .map(
                 (entry) => EngineLine(
                   rank: entry.key + 1,
-                  evaluation:
-                      (entry.value.evaluation ?? 0) /
-                      100.0, // Convert centipawns to pawns
+                  evaluation: (entry.value.evaluation ?? 0) / 100.0,
                   depth: entry.value.depth,
                   moves: entry.value.moves,
                   isMate: entry.value.mateIn != null,
@@ -311,7 +340,7 @@ class AnalysisNotifier extends StateNotifier<AnalysisState> {
               .toList();
 
       state = state.copyWith(
-        currentEval: result.evaluation / 100.0, // Convert centipawns to pawns
+        currentEval: result.evaluation / 100.0,
         currentEngineLines: engineLines,
         bestMove:
             result.lines.isNotEmpty ? result.lines.first.moves.first : null,

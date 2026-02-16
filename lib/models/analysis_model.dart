@@ -192,16 +192,20 @@ MoveClassification classifyMove({
 
   // Classify based on centipawn loss
   // Positive evalLoss means the move was worse than optimal
-  if (evalLoss >= 3.0) {
+  if (evalLoss >= 2.0) {
     return MoveClassification.blunder;
-  } else if (evalLoss >= 1.5) {
+  } else if (evalLoss >= 1.0) {
     return MoveClassification.mistake;
   } else if (evalLoss >= 0.5) {
     return MoveClassification.inaccuracy;
-  } else if (evalLoss <= -0.3) {
+  } else if (evalLoss <= -0.2) {
     // Move was better than expected (opponent blundered or brilliant find)
     return MoveClassification.excellent;
+  } else if (evalLoss <= 0.2) {
+      // Close enough to best move
+      return MoveClassification.good;
   } else {
+    // Slight inaccuracy but acceptable
     return MoveClassification.good;
   }
 }

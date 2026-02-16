@@ -5,7 +5,7 @@ class AppConstants {
 
   // App Info
   static const String appName = 'ChessMaster Offline';
-  static const String appVersion = '1.0.0';
+  static const String appVersion = '1.0.5';
 
   // Difficulty Levels (ELO and Engine Depth)
   static const List<DifficultyLevel> difficultyLevels = [
