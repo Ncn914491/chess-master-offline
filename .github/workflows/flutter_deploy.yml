@@ -17,9 +17,8 @@ jobs:
 
     env:
       # Offset to ensure version codes exceed any previously uploaded ones.
-      # You've already uploaded 5 versions, so offset=5 ensures run_number 2 -> versionCode 7.
-      # Adjust this if you get "Version code already used" errors.
-      VERSION_CODE_OFFSET: 5
+      # Setting to 10 to ensure we start double-digits (e.g. 11, 12) to avoid conflicts with 1-5.
+      VERSION_CODE_OFFSET: 10
       # Major.Minor prefix for versionName (versionName = VERSION_PREFIX.BUILD_NUMBER)
       VERSION_PREFIX: '1.0'
     
@@ -97,12 +96,20 @@ jobs:
       # ───────────────────────────────────────────────
       - name: Compute Version
         id: version
+        env:
+          OFFSET: ${{ env.VERSION_CODE_OFFSET }}
+          RUN_NUM: ${{ github.run_number }}
+          PREFIX: ${{ env.VERSION_PREFIX }}
         run: |
-          BUILD_NUMBER=$(( ${{ github.run_number }} + ${{ env.VERSION_CODE_OFFSET }} ))
-          VERSION_NAME="${{ env.VERSION_PREFIX }}.$BUILD_NUMBER"
+          # Use shell arithmetic
+          BUILD_NUMBER=$(( RUN_NUM + OFFSET ))
+          VERSION_NAME="${PREFIX}.${BUILD_NUMBER}"
+          
           echo "BUILD_NUMBER=$BUILD_NUMBER" >> $GITHUB_OUTPUT
           echo "VERSION_NAME=$VERSION_NAME" >> $GITHUB_OUTPUT
-          echo "Computed versionCode: $BUILD_NUMBER | versionName: $VERSION_NAME"
+          
+          echo "Computed versionCode: $BUILD_NUMBER (Run: $RUN_NUM + Offset: $OFFSET)"
+          echo "Computed versionName: $VERSION_NAME"
 
       - name: Build Release AAB
         env:
