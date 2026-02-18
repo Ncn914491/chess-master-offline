@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:chess_master/core/services/stockfish_service.dart';
+import 'package:chess_master/core/services/lightweight_engine_service.dart';
 import 'package:chess_master/core/constants/app_constants.dart';
 
 /// Provider for the Stockfish engine service
@@ -100,20 +101,32 @@ class EngineNotifier extends StateNotifier<EngineState> {
   }) async {
     state = state.copyWith(isThinking: true);
 
-    // Initialize if not ready
-    if (!_service.isReady) {
-      await _service.initialize();
-      if (!_service.isReady) {
-        state = state.copyWith(isThinking: false);
-        debugPrint('Engine not ready, skipping move search');
-        return null;
-      }
-    }
-
-    // Set engine strength
-    _service.setSkillLevel(difficulty.elo);
-
     try {
+      // Initialize if not ready
+      if (!_service.isReady) {
+        try {
+          await _service.initialize();
+        } catch (e) {
+          debugPrint('Stockfish init failed: $e. Using lightweight engine.');
+        }
+      }
+
+      // If Stockfish failed to init or is not ready, use fallback
+      if (!_service.isReady) {
+        final fallbackResult = await LightweightEngineService.instance
+            .getBestMove(fen, difficulty.depth);
+
+        state = state.copyWith(
+          isThinking: false,
+          bestMove: fallbackResult.bestMove,
+          evaluation: fallbackResult.evaluation,
+        );
+        return fallbackResult;
+      }
+
+      // Set engine strength
+      _service.setSkillLevel(difficulty.elo);
+
       // Add artificial delay for more human-like feel
       final minDelay = Duration(milliseconds: difficulty.thinkTimeMs ~/ 2);
       final startTime = DateTime.now();
@@ -127,8 +140,6 @@ class EngineNotifier extends StateNotifier<EngineState> {
           .timeout(
             Duration(milliseconds: difficulty.thinkTimeMs + 2000),
             onTimeout: () {
-              debugPrint('Engine timed out');
-              // Return a dummy result or throw exception
               throw TimeoutException('Engine timed out');
             },
           );
@@ -148,11 +159,23 @@ class EngineNotifier extends StateNotifier<EngineState> {
 
       return result;
     } catch (e) {
-      // Ensure engine is stopped if something goes wrong or times out
-      _service.stopAnalysis();
-      state = state.copyWith(isThinking: false);
-      debugPrint('Error getting bot move: $e');
-      return null;
+      debugPrint('Error with Stockfish: $e. Switching to lightweight engine.');
+
+      try {
+        final fallbackResult = await LightweightEngineService.instance
+            .getBestMove(fen, difficulty.depth);
+
+        state = state.copyWith(
+          isThinking: false,
+          bestMove: fallbackResult.bestMove,
+          evaluation: fallbackResult.evaluation,
+        );
+        return fallbackResult;
+      } catch (fallbackError) {
+        debugPrint('Fallback engine also failed: $fallbackError');
+        state = state.copyWith(isThinking: false);
+        return null;
+      }
     }
   }
 
@@ -161,15 +184,34 @@ class EngineNotifier extends StateNotifier<EngineState> {
     state = state.copyWith(isThinking: true);
 
     try {
-      final result = await _service.getBestMove(fen: fen, depth: depth);
+      if (!_service.isReady) {
+        try {
+          await _service.initialize();
+        } catch (e) {
+          debugPrint('Stockfish init failed for hint: $e');
+        }
+      }
 
-      state = state.copyWith(isThinking: false, bestMove: result.bestMove);
-
-      return result;
+      if (_service.isReady) {
+        final result = await _service.getBestMove(fen: fen, depth: depth);
+        state = state.copyWith(isThinking: false, bestMove: result.bestMove);
+        return result;
+      } else {
+        throw Exception('Stockfish not ready');
+      }
     } catch (e) {
-      state = state.copyWith(isThinking: false);
-      debugPrint('Error getting hint: $e');
-      return null;
+      debugPrint('Error getting hint from Stockfish: $e. Using fallback.');
+      try {
+        final result = await LightweightEngineService.instance.getBestMove(
+          fen,
+          depth,
+        );
+        state = state.copyWith(isThinking: false, bestMove: result.bestMove);
+        return result;
+      } catch (fallbackError) {
+        state = state.copyWith(isThinking: false);
+        return null;
+      }
     }
   }
 
@@ -190,6 +232,16 @@ class EngineNotifier extends StateNotifier<EngineState> {
     );
 
     try {
+      if (!_service.isReady) {
+        try {
+          await _service.initialize();
+        } catch (e) {
+          debugPrint('Stockfish init failed for analysis: $e');
+          state = state.copyWith(isAnalyzing: false);
+          return;
+        }
+      }
+
       final result = await _service.analyzePosition(
         fen: fen,
         depth: depth,
