@@ -42,10 +42,11 @@ class StockfishService {
     _initCompleter = Completer<void>();
 
     int retryCount = 0;
-    const maxRetries = 3;
+    const maxRetries = 2;
 
     while (retryCount < maxRetries) {
       try {
+        _stockfish?.dispose();
         _stockfish = Stockfish();
 
         bool uciOkReceived = false;
@@ -68,9 +69,13 @@ class StockfishService {
 
         // Wait for uciok
         int attempts = 0;
-        while (!uciOkReceived && attempts < 20) {
+        while (!uciOkReceived && attempts < 10) {
           await Future.delayed(const Duration(milliseconds: 100));
           attempts++;
+        }
+
+        if (!uciOkReceived) {
+          throw Exception('Stockfish failed to respond with uciok');
         }
 
         // Wait for engine to be ready with timeout
@@ -95,7 +100,7 @@ class StockfishService {
         if (retryCount >= maxRetries) {
           _initCompleter?.completeError(e);
           _initCompleter = null; // Allow retry later
-          return;
+          return; // Rethrow or just return, caller will see completer error
         }
 
         // Small delay before retry
@@ -117,14 +122,14 @@ class StockfishService {
     _sendCommand('isready');
 
     int attempts = 0;
-    // Timeout after 3 seconds (30 * 100ms)
-    while (!_isReady && attempts < 30) {
+    // Timeout after 2 seconds (20 * 100ms)
+    while (!_isReady && attempts < 20) {
       await Future.delayed(const Duration(milliseconds: 100));
       attempts++;
     }
 
     if (!_isReady) {
-      throw Exception('Stockfish failed to initialize after 3 seconds');
+      throw Exception('Stockfish failed to initialize (isready timeout)');
     }
   }
 
