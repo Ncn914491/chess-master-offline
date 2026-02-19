@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+﻿import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:chess_master/core/theme/app_theme.dart';
 import 'package:chess_master/core/constants/app_constants.dart';
@@ -9,8 +9,10 @@ import 'package:chess_master/providers/engine_provider.dart';
 import 'package:chess_master/screens/game/game_screen.dart';
 import 'package:chess_master/screens/history/game_history_screen.dart';
 import 'package:chess_master/core/utils/pgn_handler.dart';
+import 'package:chess_master/screens/game/widgets/chess_board.dart';
+import 'package:google_fonts/google_fonts.dart';
 
-/// Home screen - main tab for starting games
+/// Home screen - main dashboard for the Chess App
 class HomeScreen extends ConsumerStatefulWidget {
   const HomeScreen({super.key});
 
@@ -35,37 +37,74 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     return Scaffold(
       backgroundColor: AppTheme.backgroundDark,
       body: SafeArea(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.all(20),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // Header
-              _buildHeader(context),
-              const SizedBox(height: 32),
+        child: CustomScrollView(
+          physics: const BouncingScrollPhysics(),
+          slivers: [
+            SliverPadding(
+              padding: const EdgeInsets.all(20),
+              sliver: SliverToBoxAdapter(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _buildHeader(context),
+                    const SizedBox(height: 24),
+                    _buildQuickPlayHero(context),
+                    const SizedBox(height: 32),
+                  ],
+                ),
+              ),
+            ),
 
-              // Play with Bot Section
-              _buildSectionTitle(context, '🤖 Play with Bot'),
-              const SizedBox(height: 16),
-              _buildBotOptionsCard(context),
-              const SizedBox(height: 24),
+            // Game Modes Grid
+            SliverPadding(
+              padding: const EdgeInsets.symmetric(horizontal: 20),
+              sliver: SliverToBoxAdapter(
+                child: _buildSectionTitle(context, 'Game Modes'),
+              ),
+            ),
+            const SliverToBoxAdapter(child: SizedBox(height: 16)),
+            SliverPadding(
+              padding: const EdgeInsets.symmetric(horizontal: 20),
+              sliver: SliverGrid(
+                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                  crossAxisCount: 2,
+                  crossAxisSpacing: 16,
+                  mainAxisSpacing: 16,
+                  childAspectRatio: 1.1,
+                ),
+                delegate: SliverChildListDelegate([
+                  _buildGameModeCard(
+                    context,
+                    title: 'Play Bot',
+                    subtitle: 'Challenge AI',
+                    icon: Icons.smart_toy_outlined,
+                    color: AppTheme.primaryColor,
+                    onTap: () => _showBotGameSetup(context),
+                  ),
+                  _buildGameModeCard(
+                    context,
+                    title: 'Play Friend',
+                    subtitle: 'Local Match',
+                    icon: Icons.people_outline,
+                    color: AppTheme.secondaryColor,
+                    onTap: () => _showLocalMultiplayerSetup(context),
+                  ),
+                ]),
+              ),
+            ),
 
-              // Play with Friend Section
-              _buildSectionTitle(context, '👥 Play with Friend'),
-              const SizedBox(height: 16),
-              _buildFriendModeCard(context),
-              const SizedBox(height: 24),
+            const SliverToBoxAdapter(child: SizedBox(height: 32)),
 
-              // Continue / Load Game Section
-              _buildSectionTitle(context, '📂 Continue Game'),
-              const SizedBox(height: 16),
-              _buildLoadGameCard(context),
-              const SizedBox(height: 32),
+            // Continue Playing Carousel
+            SliverPadding(
+              padding: const EdgeInsets.symmetric(horizontal: 20),
+              sliver: SliverToBoxAdapter(child: _buildContinueSection(context)),
+            ),
 
-              // Quick Start
-              _buildQuickStartSection(context),
-            ],
-          ),
+            const SliverToBoxAdapter(
+              child: SizedBox(height: 100), // Bottom padding
+            ),
+          ],
         ),
       ),
     );
@@ -73,294 +112,433 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 
   Widget _buildHeader(BuildContext context) {
     return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
-        Container(
-          width: 56,
-          height: 56,
-          decoration: BoxDecoration(
-            gradient: const LinearGradient(
-              colors: [AppTheme.primaryColor, AppTheme.primaryLight],
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-            ),
-            borderRadius: BorderRadius.circular(16),
-            boxShadow: [
-              BoxShadow(
-                color: AppTheme.primaryColor.withOpacity(0.4),
-                blurRadius: 12,
-                offset: const Offset(0, 4),
-              ),
-            ],
-          ),
-          child: const Center(
-            child: Text(
-              '♔',
-              style: TextStyle(fontSize: 32, color: Colors.white),
-            ),
-          ),
-        ),
-        const SizedBox(width: 16),
         Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              'Play Chess',
-              style: Theme.of(
-                context,
-              ).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold),
-            ),
-            Text(
-              'Choose your game mode',
+              'Welcome Back,',
               style: Theme.of(
                 context,
               ).textTheme.bodyMedium?.copyWith(color: AppTheme.textSecondary),
             ),
+            const SizedBox(height: 4),
+            Text(
+              'Chess Master',
+              style: GoogleFonts.inter(
+                fontSize: 24,
+                fontWeight: FontWeight.bold,
+                color: AppTheme.textPrimary,
+              ),
+            ),
           ],
+        ),
+        Container(
+          height: 48,
+          width: 48,
+          decoration: BoxDecoration(
+            color: AppTheme.cardDark,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: AppTheme.borderColor),
+          ),
+          child: IconButton(
+            icon: const Icon(
+              Icons.settings_outlined,
+              color: AppTheme.textPrimary,
+            ),
+            onPressed: () {
+              // Settings navigation handled by main tab controller
+              // Or we can push settings screen directly if not using tabs
+            },
+          ),
         ),
       ],
     );
   }
 
-  Widget _buildSectionTitle(BuildContext context, String title) {
-    return Text(
-      title,
-      style: Theme.of(
-        context,
-      ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600),
-    );
-  }
-
-  Widget _buildBotOptionsCard(BuildContext context) {
-    return Container(
-      decoration: BoxDecoration(
-        color: AppTheme.cardDark,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: AppTheme.surfaceDark),
-      ),
-      child: Column(
-        children: [
-          // Standard Game - Level Selection
-          _buildOptionTile(
-            context,
-            icon: Icons.trending_up,
-            title: 'Standard Game',
-            subtitle: 'Play through levels 1-10',
-            color: Colors.green,
-            onTap: () => _showLevelSelectionSheet(context),
+  Widget _buildQuickPlayHero(BuildContext context) {
+    return GestureDetector(
+      onTap: () => _startQuickGame(3), // Defaulting to Level 3 for Quick Play
+      child: Container(
+        width: double.infinity,
+        height: 180,
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(16),
+          gradient: const LinearGradient(
+            colors: [
+              Color(0xFF1B5E20),
+              Color(0xFF0D0D0D),
+            ], // Deep Green to Black
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
           ),
-          const Divider(height: 1, color: AppTheme.surfaceDark),
-          // Custom ELO
-          _buildOptionTile(
-            context,
-            icon: Icons.tune,
-            title: 'Choose ELO',
-            subtitle: 'Custom difficulty (800-2800)',
-            color: Colors.orange,
-            onTap: () => _showCustomEloDialog(context),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildFriendModeCard(BuildContext context) {
-    return Container(
-      decoration: BoxDecoration(
-        color: AppTheme.cardDark,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: AppTheme.surfaceDark),
-      ),
-      child: _buildOptionTile(
-        context,
-        icon: Icons.people,
-        title: 'Local Multiplayer',
-        subtitle: '2 players on same device',
-        color: Colors.blue,
-        onTap: () => _showLocalMultiplayerSetup(context),
-      ),
-    );
-  }
-
-  Widget _buildLoadGameCard(BuildContext context) {
-    return Container(
-      decoration: BoxDecoration(
-        color: AppTheme.cardDark,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: AppTheme.surfaceDark),
-      ),
-      child: Column(
-        children: [
-          // Resume Last Game
-          _buildOptionTile(
-            context,
-            icon: Icons.play_circle_outline,
-            title: 'Resume Last Game',
-            subtitle: 'Continue where you left off',
-            color: Colors.purple,
-            onTap: () => _continueLastGame(context),
-          ),
-          const Divider(height: 1, color: AppTheme.surfaceDark),
-          // Saved Games
-          _buildOptionTile(
-            context,
-            icon: Icons.folder_outlined,
-            title: 'Saved Games',
-            subtitle: 'Load from game history',
-            color: Colors.teal,
-            onTap: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (context) => const GameHistoryScreen(),
+          boxShadow: [
+            BoxShadow(
+              color: AppTheme.primaryColor.withOpacity(0.3),
+              blurRadius: 20,
+              offset: const Offset(0, 10),
+            ),
+          ],
+          border: Border.all(color: AppTheme.borderColor.withOpacity(0.5)),
+        ),
+        child: Stack(
+          children: [
+            Positioned(
+              right: -20,
+              bottom: -20,
+              child: Opacity(
+                opacity: 0.1,
+                child: Icon(
+                  Icons.videogame_asset,
+                  size: 180,
+                  color: Colors.white,
                 ),
-              );
-            },
-          ),
-          const Divider(height: 1, color: AppTheme.surfaceDark),
-          // Load from PGN
-          _buildOptionTile(
-            context,
-            icon: Icons.upload_file,
-            title: 'Load from PGN',
-            subtitle: 'Import game or position',
-            color: Colors.amber,
-            onTap: () => _showLoadPGNDialog(context),
-          ),
-        ],
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.all(24),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 6,
+                    ),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: Text(
+                      'RECOMMENDED',
+                      style: GoogleFonts.inter(
+                        fontSize: 10,
+                        fontWeight: FontWeight.bold,
+                        color: AppTheme.primaryLight,
+                        letterSpacing: 1.0,
+                      ),
+                    ),
+                  ),
+                  const Spacer(),
+                  Text(
+                    'Quick Play',
+                    style: GoogleFonts.inter(
+                      fontSize: 32,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.white,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Jump into a match instantly',
+                    style: GoogleFonts.inter(
+                      fontSize: 14,
+                      color: Colors.white.withOpacity(0.7),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
 
-  Widget _buildOptionTile(
+  Widget _buildSectionTitle(BuildContext context, String title) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        Text(
+          title,
+          style: GoogleFonts.inter(
+            fontSize: 18,
+            fontWeight: FontWeight.bold,
+            color: AppTheme.textPrimary,
+          ),
+        ),
+        // Optional: 'See All' button
+      ],
+    );
+  }
+
+  Widget _buildGameModeCard(
     BuildContext context, {
-    required IconData icon,
     required String title,
     required String subtitle,
+    required IconData icon,
     required Color color,
     required VoidCallback onTap,
   }) {
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(16),
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Row(
-            children: [
-              Container(
-                width: 48,
-                height: 48,
-                decoration: BoxDecoration(
-                  color: color.withOpacity(0.15),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Icon(icon, color: color, size: 24),
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        decoration: BoxDecoration(
+          color: AppTheme.cardDark,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: AppTheme.borderColor),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.2),
+              blurRadius: 8,
+              offset: const Offset(0, 4),
+            ),
+          ],
+        ),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: color.withOpacity(0.1),
+                shape: BoxShape.circle,
               ),
-              const SizedBox(width: 16),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(title, style: Theme.of(context).textTheme.titleMedium),
-                    const SizedBox(height: 2),
-                    Text(
-                      subtitle,
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: AppTheme.textSecondary,
-                      ),
-                    ),
-                  ],
-                ),
+              child: Icon(icon, color: color, size: 32),
+            ),
+            const SizedBox(height: 16),
+            Text(
+              title,
+              style: GoogleFonts.inter(
+                fontSize: 16,
+                fontWeight: FontWeight.bold,
+                color: AppTheme.textPrimary,
               ),
-              const Icon(Icons.chevron_right, color: AppTheme.textHint),
-            ],
-          ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              subtitle,
+              style: GoogleFonts.inter(
+                fontSize: 12,
+                color: AppTheme.textSecondary,
+              ),
+            ),
+          ],
         ),
       ),
     );
   }
 
-  Widget _buildQuickStartSection(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          colors: [
-            AppTheme.primaryColor.withOpacity(0.1),
-            AppTheme.primaryLight.withOpacity(0.1),
+  Widget _buildContinueSection(BuildContext context) {
+    return Column(
+      children: [
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            _buildSectionTitle(context, 'Continue Game'),
+            TextButton(
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => const GameHistoryScreen(),
+                  ),
+                );
+              },
+              child: Text(
+                'View All',
+                style: TextStyle(color: AppTheme.primaryColor),
+              ),
+            ),
           ],
         ),
+        const SizedBox(height: 16),
+        SizedBox(
+          height: 180,
+          child: FutureBuilder<List<Map<String, dynamic>>>(
+            future: ref
+                .read(databaseServiceProvider)
+                .getRecentGames(limit: 5, includeCompleted: false),
+            builder: (context, snapshot) {
+              if (snapshot.connectionState == ConnectionState.waiting) {
+                return const Center(child: CircularProgressIndicator());
+              }
+
+              if (!snapshot.hasData || snapshot.data!.isEmpty) {
+                return _buildEmptyStateCard(context);
+              }
+
+              final games = snapshot.data!;
+              return ListView.separated(
+                scrollDirection: Axis.horizontal,
+                physics: const BouncingScrollPhysics(),
+                itemCount: games.length,
+                separatorBuilder: (context, index) => const SizedBox(width: 16),
+                itemBuilder: (context, index) {
+                  final game = games[index];
+                  return _buildContinueGameCard(context, game);
+                },
+              );
+            },
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildContinueGameCard(
+    BuildContext context,
+    Map<String, dynamic> game,
+  ) {
+    final fen =
+        game['fen_current'] as String? ??
+        'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
+    final opponent =
+        game['game_mode'] == 'bot'
+            ? 'Bot (${game['bot_elo'] ?? 1200})'
+            : 'Friend';
+    final moveCount = game['move_count'] ?? 0;
+    final isCompleted = (game['is_completed'] as int?) == 1;
+
+    return GestureDetector(
+      onTap: () => _resumeGame(context, game),
+      child: Container(
+        width: 280,
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: AppTheme.cardDark,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: AppTheme.borderColor),
+        ),
+        child: Row(
+          children: [
+            // Mini Board Preview
+            ClipRRect(
+              borderRadius: BorderRadius.circular(8),
+              child: SizedBox(
+                width: 100,
+                height: 100,
+                child: AbsorbPointer(
+                  child: ChessBoard(
+                    fen: fen,
+                    showCoordinates: false,
+                    showHint: false,
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(width: 16),
+            Expanded(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Vs $opponent',
+                    style: GoogleFonts.inter(
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                      color: AppTheme.textPrimary,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Move $moveCount',
+                    style: GoogleFonts.inter(
+                      fontSize: 14,
+                      color: AppTheme.textSecondary,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 4,
+                    ),
+                    decoration: BoxDecoration(
+                      color:
+                          isCompleted
+                              ? Colors.grey.withOpacity(0.2)
+                              : AppTheme.primaryColor.withOpacity(0.2),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Text(
+                      isCompleted ? 'Completed' : 'Resume',
+                      style: GoogleFonts.inter(
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold,
+                        color:
+                            isCompleted ? Colors.grey : AppTheme.primaryColor,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildEmptyStateCard(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(24),
+      decoration: BoxDecoration(
+        color: AppTheme.cardDark,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: AppTheme.primaryColor.withOpacity(0.3)),
+        border: Border.all(
+          color: AppTheme.borderColor,
+          style: BorderStyle.solid,
+        ),
       ),
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Row(
-            children: [
-              const Icon(Icons.bolt, color: AppTheme.accentColor, size: 20),
-              const SizedBox(width: 8),
-              Text(
-                'Quick Start',
-                style: Theme.of(context).textTheme.titleMedium,
-              ),
-            ],
-          ),
+          const Icon(Icons.history, color: AppTheme.textSecondary, size: 48),
           const SizedBox(height: 16),
-          Row(
-            children: [
-              Expanded(
-                child: _QuickStartButton(
-                  label: 'Easy',
-                  sublabel: 'Level 3',
-                  color: Colors.green,
-                  onTap: () => _startQuickGame(3),
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: _QuickStartButton(
-                  label: 'Medium',
-                  sublabel: 'Level 5',
-                  color: Colors.orange,
-                  onTap: () => _startQuickGame(5),
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: _QuickStartButton(
-                  label: 'Hard',
-                  sublabel: 'Level 7',
-                  color: Colors.red,
-                  onTap: () => _startQuickGame(7),
-                ),
-              ),
-            ],
+          Text(
+            'No recent games',
+            style: GoogleFonts.inter(
+              color: AppTheme.textSecondary,
+              fontSize: 16,
+            ),
           ),
         ],
       ),
     );
   }
 
-  // ========== Actions ==========
+  // ========== Actions & Logic ==========
 
-  void _showLevelSelectionSheet(BuildContext context) {
+  void _showBotGameSetup(BuildContext context) {
+    // First, show bot type selection
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder:
+          (context) => _BotTypeSelectionSheet(
+            onBotTypeSelected: (botType) {
+              Navigator.pop(context);
+              _showLevelSelection(context, botType);
+            },
+          ),
+    );
+  }
+
+  void _showLevelSelection(BuildContext context, BotType botType) {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder:
           (context) => _LevelSelectionSheet(
+            botType: botType,
             onLevelSelected: (level) {
               Navigator.pop(context);
-              _showGameSetupSheet(context, level);
+              _showGameSetupSheet(context, level, botType);
             },
           ),
     );
   }
 
-  void _showGameSetupSheet(BuildContext context, int level) {
+  void _showGameSetupSheet(BuildContext context, int level, BotType botType) {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -368,30 +546,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       builder:
           (context) => _GameSetupSheet(
             difficultyLevel: level,
+            botType: botType,
             onStartGame: (playerColor, timeControl) async {
               Navigator.pop(context);
-              await _startBotGame(level, playerColor, timeControl);
-            },
-          ),
-    );
-  }
-
-  void _showCustomEloDialog(BuildContext context) {
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder:
-          (context) => _CustomEloSheet(
-            onStartGame: (elo, playerColor, timeControl) async {
-              Navigator.pop(context);
-              // Find closest difficulty level
-              final level =
-                  AppConstants.difficultyLevels
-                      .indexWhere((d) => d.elo >= elo)
-                      .clamp(0, 9) +
-                  1;
-              await _startBotGame(level, playerColor, timeControl);
+              await _startBotGame(level, playerColor, timeControl, botType);
             },
           ),
     );
@@ -412,67 +570,49 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     );
   }
 
-  void _showLoadPGNDialog(BuildContext context) {
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder:
-          (context) => _LoadPGNSheet(
-            onLoad: (pgn) {
-              Navigator.pop(context);
-              final gameState = PGNHandler.parsePgn(pgn);
-              if (gameState != null) {
-                ref.read(gameProvider.notifier).state = gameState;
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (context) => const GameScreen()),
-                );
-              } else {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Invalid PGN!')),
-                );
-              }
-            },
-          ),
-    );
-  }
-
   Future<void> _startQuickGame(int level) async {
     final difficulty = AppConstants.difficultyLevels[level - 1];
-    await _startBotGame(level, PlayerColor.white, AppConstants.timeControls[0]);
+    await _startBotGame(
+      level,
+      PlayerColor.white,
+      AppConstants.timeControls[0],
+      BotType.simple,
+    );
   }
 
   Future<void> _startBotGame(
     int level,
     PlayerColor playerColor,
     TimeControl timeControl,
+    BotType botType,
   ) async {
     setState(() => _isLoading = true);
 
     try {
       final difficulty = AppConstants.difficultyLevels[level - 1];
 
-      // Initialize engine with timeout to prevent hanging
-      final engineNotifier = ref.read(engineProvider.notifier);
-      try {
-        await engineNotifier.initialize().timeout(const Duration(seconds: 5));
-      } catch (e) {
-        // Engine initialization failed - show warning but don't start bot game
-        debugPrint('Engine init warning: $e');
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text(
-                'Engine initialization failed. You can still play local multiplayer games.',
+      // Only initialize engine if using Stockfish
+      if (botType == BotType.stockfish) {
+        final engineNotifier = ref.read(engineProvider.notifier);
+        try {
+          await engineNotifier.initialize().timeout(const Duration(seconds: 5));
+        } catch (e) {
+          debugPrint('Engine init warning: $e');
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text(
+                  'Stockfish unavailable. Switching to Simple Bot.',
+                ),
+                backgroundColor: Colors.orange,
               ),
-              backgroundColor: Colors.orange,
-            ),
-          );
+            );
+            // Fall back to Simple Bot
+            botType = BotType.simple;
+          }
         }
-        return; // Don't start bot game if engine failed
+        engineNotifier.resetForNewGame();
       }
-      engineNotifier.resetForNewGame();
 
       // Resolve random color
       PlayerColor actualColor = playerColor;
@@ -491,6 +631,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
             difficulty: difficulty,
             timeControl: timeControl,
             gameMode: GameMode.bot,
+            botType: botType,
             useTimer: timeControl.hasTimer,
           );
 
@@ -502,12 +643,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Failed to start game: $e'),
-            backgroundColor: Colors.red,
-          ),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Failed to start game: $e')));
       }
     } finally {
       if (mounted) {
@@ -521,9 +659,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     bool allowTakeback,
     bool autoFlip,
   ) async {
-    // Start local multiplayer game (no engine needed)
-
-    // Update auto flip setting
     final settings = ref.read(settingsProvider);
     if (settings.autoFlipBoard != autoFlip) {
       ref.read(settingsProvider.notifier).toggleAutoFlipBoard();
@@ -532,10 +667,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     ref
         .read(gameProvider.notifier)
         .startNewGame(
-          playerColor:
-              PlayerColor.white, // In local mode, both players use same device
-          difficulty:
-              AppConstants.difficultyLevels[4], // Not used in local mode
+          playerColor: PlayerColor.white,
+          difficulty: AppConstants.difficultyLevels[4],
           timeControl: timeControl,
           gameMode: GameMode.localMultiplayer,
           allowTakeback: allowTakeback,
@@ -550,17 +683,25 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     }
   }
 
-  Future<void> _continueLastGame(BuildContext context) async {
+  Future<void> _resumeGame(
+    BuildContext context,
+    Map<String, dynamic> game,
+  ) async {
     try {
-      final dbService = ref.read(databaseServiceProvider);
-      final lastGame = await dbService.getLastUnfinishedGame();
+      final isCompleted = (game['is_completed'] as int?) == 1;
 
-      if (lastGame == null) {
-        if (context.mounted) {
-          ScaffoldMessenger.of(
-            context,
-          ).showSnackBar(const SnackBar(content: Text('No saved game found')));
-        }
+      // If completed, maybe just navigate to review or history
+      // But for now, let's load it as a game (maybe in analysis mode?)
+      // For simplicity, we restart it or handle it as resume.
+      // If it's completed, we probably shouldn't "resume" it in gameplay sense.
+      // But let's assume the user wants to see the position.
+
+      if (isCompleted) {
+        // Navigate to history/analysis
+        Navigator.push(
+          context,
+          MaterialPageRoute(builder: (context) => const GameHistoryScreen()),
+        );
         return;
       }
 
@@ -570,23 +711,20 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       engineNotifier.resetForNewGame();
 
       // Load game settings
-      final playerColorStr = lastGame['player_color'] as String? ?? 'white';
+      final playerColorStr = game['player_color'] as String? ?? 'white';
       final playerColor =
           playerColorStr == 'white' ? PlayerColor.white : PlayerColor.black;
-
-      final botElo = lastGame['bot_elo'] as int? ?? 1200;
+      final botElo = game['bot_elo'] as int? ?? 1200;
       final difficultyIndex = AppConstants.difficultyLevels
           .indexWhere((d) => d.elo == botElo)
-          .clamp(0, AppConstants.difficultyLevels.length - 1);
+          .clamp(0, 9);
       final difficulty = AppConstants.difficultyLevels[difficultyIndex];
-
-      final timeControlStr = lastGame['time_control'] as String? ?? 'No Timer';
+      final timeControlStr = game['time_control'] as String? ?? 'No Timer';
       final timeControlIndex = AppConstants.timeControls
           .indexWhere((tc) => tc.name == timeControlStr)
           .clamp(0, AppConstants.timeControls.length - 1);
       final timeControl = AppConstants.timeControls[timeControlIndex];
-
-      final fenCurrent = lastGame['fen_current'] as String?;
+      final fenCurrent = game['fen_current'] as String?;
 
       ref
           .read(gameProvider.notifier)
@@ -614,69 +752,22 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   }
 }
 
-// ========== Quick Start Button ==========
+// Helpers/Bottom Sheets... (Including the existing ones like _LevelSelectionSheet, etc.)
+// Since I'm replacing the whole file, I need to include the sheet classes.
 
-class _QuickStartButton extends StatelessWidget {
-  final String label;
-  final String sublabel;
-  final Color color;
-  final VoidCallback onTap;
+class _LevelSelectionSheet extends StatelessWidget {
+  final BotType botType;
+  final Function(int level) onLevelSelected;
 
-  const _QuickStartButton({
-    required this.label,
-    required this.sublabel,
-    required this.color,
-    required this.onTap,
+  const _LevelSelectionSheet({
+    required this.botType,
+    required this.onLevelSelected,
   });
 
   @override
   Widget build(BuildContext context) {
-    return Material(
-      color: color.withOpacity(0.15),
-      borderRadius: BorderRadius.circular(12),
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(12),
-        child: Container(
-          padding: const EdgeInsets.symmetric(vertical: 16),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: color.withOpacity(0.3)),
-          ),
-          child: Column(
-            children: [
-              Text(
-                label,
-                style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                  color: color,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-              const SizedBox(height: 2),
-              Text(
-                sublabel,
-                style: Theme.of(
-                  context,
-                ).textTheme.bodySmall?.copyWith(color: AppTheme.textSecondary),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-// ========== Level Selection Sheet ==========
-
-class _LevelSelectionSheet extends StatelessWidget {
-  final Function(int level) onLevelSelected;
-
-  const _LevelSelectionSheet({required this.onLevelSelected});
-
-  @override
-  Widget build(BuildContext context) {
     return Container(
+      padding: const EdgeInsets.only(top: 10, bottom: 20),
       decoration: const BoxDecoration(
         color: AppTheme.surfaceDark,
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
@@ -684,62 +775,80 @@ class _LevelSelectionSheet extends StatelessWidget {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          _buildHandle(),
+          Container(
+            width: 40,
+            height: 4,
+            decoration: BoxDecoration(
+              color: Colors.grey[700],
+              borderRadius: BorderRadius.circular(2),
+            ),
+          ),
           Padding(
             padding: const EdgeInsets.all(20),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  'Select Level',
-                  style: Theme.of(context).textTheme.headlineSmall,
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  'Choose your difficulty level',
-                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                    color: AppTheme.textSecondary,
-                  ),
+                Row(
+                  children: [
+                    Text(
+                      'Select Difficulty',
+                      style: GoogleFonts.inter(
+                        fontSize: 20,
+                        fontWeight: FontWeight.bold,
+                        color: AppTheme.textPrimary,
+                      ),
+                    ),
+                    const Spacer(),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 6,
+                      ),
+                      decoration: BoxDecoration(
+                        color:
+                            botType == BotType.simple
+                                ? AppTheme.primaryColor.withOpacity(0.2)
+                                : Colors.red.withOpacity(0.2),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Text(
+                        botType.displayName,
+                        style: GoogleFonts.inter(
+                          fontSize: 12,
+                          fontWeight: FontWeight.bold,
+                          color:
+                              botType == BotType.simple
+                                  ? AppTheme.primaryColor
+                                  : Colors.red,
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
                 const SizedBox(height: 20),
-                // Level grid
                 GridView.builder(
                   shrinkWrap: true,
                   physics: const NeverScrollableScrollPhysics(),
                   gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
                     crossAxisCount: 5,
-                    childAspectRatio: 1,
+                    childAspectRatio: 0.9,
                     crossAxisSpacing: 12,
                     mainAxisSpacing: 12,
                   ),
                   itemCount: 10,
                   itemBuilder: (context, index) {
                     final level = index + 1;
-                    final difficulty = AppConstants.difficultyLevels[index];
                     return _LevelButton(
                       level: level,
-                      elo: difficulty.elo,
+                      elo: AppConstants.difficultyLevels[index].elo,
                       onTap: () => onLevelSelected(level),
                     );
                   },
                 ),
-                const SizedBox(height: 20),
               ],
             ),
           ),
         ],
-      ),
-    );
-  }
-
-  Widget _buildHandle() {
-    return Container(
-      margin: const EdgeInsets.only(top: 12),
-      width: 40,
-      height: 4,
-      decoration: BoxDecoration(
-        color: Colors.grey[600],
-        borderRadius: BorderRadius.circular(2),
       ),
     );
   }
@@ -758,57 +867,49 @@ class _LevelButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final color = _getLevelColor(level);
+    // simplified color logic
+    Color color = AppTheme.primaryColor;
+    if (level > 3) color = Colors.orange;
+    if (level > 7) color = Colors.red;
 
-    return Material(
-      color: color.withOpacity(0.15),
-      borderRadius: BorderRadius.circular(12),
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(12),
-        child: Container(
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: color.withOpacity(0.5)),
-          ),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Text(
-                '$level',
-                style: TextStyle(
-                  fontSize: 20,
-                  fontWeight: FontWeight.bold,
-                  color: color,
-                ),
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        decoration: BoxDecoration(
+          color: color.withOpacity(0.15),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: color.withOpacity(0.5)),
+        ),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Text(
+              '$level',
+              style: TextStyle(
+                fontSize: 20,
+                fontWeight: FontWeight.bold,
+                color: color,
               ),
-              Text(
-                '$elo',
-                style: TextStyle(fontSize: 10, color: AppTheme.textSecondary),
-              ),
-            ],
-          ),
+            ),
+            Text(
+              '$elo',
+              style: TextStyle(fontSize: 10, color: AppTheme.textSecondary),
+            ),
+          ],
         ),
       ),
     );
   }
-
-  Color _getLevelColor(int level) {
-    if (level <= 3) return Colors.green;
-    if (level <= 5) return Colors.orange;
-    if (level <= 7) return Colors.deepOrange;
-    return Colors.red;
-  }
 }
-
-// ========== Game Setup Sheet ==========
 
 class _GameSetupSheet extends StatefulWidget {
   final int difficultyLevel;
+  final BotType botType;
   final Function(PlayerColor, TimeControl) onStartGame;
 
   const _GameSetupSheet({
     required this.difficultyLevel,
+    required this.botType,
     required this.onStartGame,
   });
 
@@ -818,100 +919,111 @@ class _GameSetupSheet extends StatefulWidget {
 
 class _GameSetupSheetState extends State<_GameSetupSheet> {
   PlayerColor _selectedColor = PlayerColor.white;
-  int _selectedTimeControlIndex = 0;
+  TimeControl _selectedTimeControl = AppConstants.timeControls[0];
 
   @override
   Widget build(BuildContext context) {
-    final difficulty =
-        AppConstants.difficultyLevels[widget.difficultyLevel - 1];
-
     return Container(
       decoration: const BoxDecoration(
         color: AppTheme.surfaceDark,
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
+      padding: const EdgeInsets.all(24),
       child: Column(
         mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          _buildHandle(),
-          Padding(
-            padding: const EdgeInsets.all(20),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Level ${widget.difficultyLevel} - ${difficulty.name}',
-                  style: Theme.of(context).textTheme.headlineSmall,
-                ),
-                Text(
-                  '${difficulty.elo} ELO',
-                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                    color: AppTheme.textSecondary,
-                  ),
-                ),
-                const SizedBox(height: 24),
-
-                // Color selection
-                Text('Play as', style: Theme.of(context).textTheme.titleMedium),
-                const SizedBox(height: 12),
-                Row(
-                  children:
-                      PlayerColor.values.map((color) {
-                        return Expanded(
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(horizontal: 4),
-                            child: _ColorChip(
-                              color: color,
-                              isSelected: _selectedColor == color,
-                              onTap:
-                                  () => setState(() => _selectedColor = color),
-                            ),
-                          ),
-                        );
-                      }).toList(),
-                ),
-                const SizedBox(height: 24),
-
-                // Time control
-                Text(
-                  'Time Control',
-                  style: Theme.of(context).textTheme.titleMedium,
-                ),
-                const SizedBox(height: 12),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: List.generate(AppConstants.timeControls.length, (
-                    index,
-                  ) {
-                    final tc = AppConstants.timeControls[index];
-                    return ChoiceChip(
-                      label: Text(tc.name),
-                      selected: _selectedTimeControlIndex == index,
-                      onSelected:
-                          (_) =>
-                              setState(() => _selectedTimeControlIndex = index),
+          Center(
+            child: Container(
+              width: 40,
+              height: 4,
+              margin: const EdgeInsets.only(bottom: 20),
+              decoration: BoxDecoration(
+                color: Colors.grey[700],
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+          ),
+          Text(
+            'Game Options',
+            style: GoogleFonts.inter(
+              fontSize: 20,
+              fontWeight: FontWeight.bold,
+              color: AppTheme.textPrimary,
+            ),
+          ),
+          const SizedBox(height: 24),
+          Text(
+            'Play As',
+            style: GoogleFonts.inter(
+              fontWeight: FontWeight.bold,
+              color: AppTheme.textSecondary,
+            ),
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              _buildColorOption(
+                PlayerColor.white,
+                'White',
+                Icons.circle_outlined,
+              ),
+              const SizedBox(width: 12),
+              _buildColorOption(PlayerColor.random, 'Random', Icons.shuffle),
+              const SizedBox(width: 12),
+              _buildColorOption(PlayerColor.black, 'Black', Icons.circle),
+            ],
+          ),
+          const SizedBox(height: 24),
+          Text(
+            'Time Control',
+            style: GoogleFonts.inter(
+              fontWeight: FontWeight.bold,
+              color: AppTheme.textSecondary,
+            ),
+          ),
+          const SizedBox(height: 12),
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(
+              children:
+                  AppConstants.timeControls.map((tc) {
+                    final isSelected = _selectedTimeControl == tc;
+                    return Padding(
+                      padding: const EdgeInsets.only(right: 12),
+                      child: ChoiceChip(
+                        label: Text(tc.name),
+                        selected: isSelected,
+                        onSelected: (selected) {
+                          if (selected)
+                            setState(() => _selectedTimeControl = tc);
+                        },
+                        backgroundColor: AppTheme.cardDark,
+                        selectedColor: AppTheme.primaryColor,
+                        labelStyle: TextStyle(
+                          color:
+                              isSelected
+                                  ? Colors.white
+                                  : AppTheme.textSecondary,
+                          fontWeight:
+                              isSelected ? FontWeight.bold : FontWeight.normal,
+                        ),
+                      ),
                     );
-                  }),
-                ),
-                const SizedBox(height: 32),
-
-                // Start button
-                SizedBox(
-                  width: double.infinity,
-                  height: 56,
-                  child: ElevatedButton(
-                    onPressed: () {
-                      widget.onStartGame(
-                        _selectedColor,
-                        AppConstants.timeControls[_selectedTimeControlIndex],
-                      );
-                    },
-                    child: const Text('Start Game'),
-                  ),
-                ),
-                const SizedBox(height: 16),
-              ],
+                  }).toList(),
+            ),
+          ),
+          const SizedBox(height: 32),
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton(
+              onPressed:
+                  () =>
+                      widget.onStartGame(_selectedColor, _selectedTimeControl),
+              style: ElevatedButton.styleFrom(
+                padding: const EdgeInsets.symmetric(vertical: 16),
+              ),
+              child: const Text('Start Game'),
             ),
           ),
         ],
@@ -919,57 +1031,39 @@ class _GameSetupSheetState extends State<_GameSetupSheet> {
     );
   }
 
-  Widget _buildHandle() {
-    return Container(
-      margin: const EdgeInsets.only(top: 12),
-      width: 40,
-      height: 4,
-      decoration: BoxDecoration(
-        color: Colors.grey[600],
-        borderRadius: BorderRadius.circular(2),
-      ),
-    );
-  }
-}
-
-class _ColorChip extends StatelessWidget {
-  final PlayerColor color;
-  final bool isSelected;
-  final VoidCallback onTap;
-
-  const _ColorChip({
-    required this.color,
-    required this.isSelected,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Material(
-      color: isSelected ? AppTheme.primaryColor : AppTheme.cardDark,
-      borderRadius: BorderRadius.circular(12),
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(12),
-        child: Padding(
+  Widget _buildColorOption(PlayerColor color, String label, IconData icon) {
+    final isSelected = _selectedColor == color;
+    return Expanded(
+      child: GestureDetector(
+        onTap: () => setState(() => _selectedColor = color),
+        child: Container(
           padding: const EdgeInsets.symmetric(vertical: 12),
+          decoration: BoxDecoration(
+            color:
+                isSelected
+                    ? AppTheme.primaryColor.withOpacity(0.2)
+                    : AppTheme.cardDark,
+            border: Border.all(
+              color: isSelected ? AppTheme.primaryColor : Colors.transparent,
+            ),
+            borderRadius: BorderRadius.circular(12),
+          ),
           child: Column(
             children: [
-              Text(
-                color == PlayerColor.white
-                    ? '♔'
-                    : color == PlayerColor.black
-                    ? '♚'
-                    : '🎲',
-                style: const TextStyle(fontSize: 24),
+              Icon(
+                icon,
+                color:
+                    isSelected ? AppTheme.primaryColor : AppTheme.textSecondary,
               ),
               const SizedBox(height: 4),
               Text(
-                color.displayName,
+                label,
                 style: TextStyle(
-                  color: isSelected ? Colors.white : AppTheme.textPrimary,
-                  fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-                  fontSize: 12,
+                  color:
+                      isSelected
+                          ? AppTheme.primaryColor
+                          : AppTheme.textSecondary,
+                  fontWeight: FontWeight.bold,
                 ),
               ),
             ],
@@ -980,165 +1074,19 @@ class _ColorChip extends StatelessWidget {
   }
 }
 
-// ========== Custom ELO Sheet ==========
-
-class _CustomEloSheet extends StatefulWidget {
-  final Function(int elo, PlayerColor, TimeControl) onStartGame;
-
-  const _CustomEloSheet({required this.onStartGame});
-
-  @override
-  State<_CustomEloSheet> createState() => _CustomEloSheetState();
-}
-
-class _CustomEloSheetState extends State<_CustomEloSheet> {
-  double _selectedElo = 1200;
-  PlayerColor _selectedColor = PlayerColor.white;
-  int _selectedTimeControlIndex = 0;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      decoration: const BoxDecoration(
-        color: AppTheme.surfaceDark,
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          _buildHandle(),
-          Padding(
-            padding: const EdgeInsets.all(20),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Choose ELO',
-                  style: Theme.of(context).textTheme.headlineSmall,
-                ),
-                const SizedBox(height: 24),
-
-                // ELO Slider
-                Text(
-                  'Bot Strength: ${_selectedElo.round()} ELO',
-                  style: Theme.of(context).textTheme.titleMedium,
-                ),
-                Slider(
-                  value: _selectedElo,
-                  min: 800,
-                  max: 2800,
-                  divisions: 20,
-                  label: '${_selectedElo.round()}',
-                  onChanged: (value) => setState(() => _selectedElo = value),
-                ),
-                const SizedBox(height: 24),
-
-                // Color selection
-                Text('Play as', style: Theme.of(context).textTheme.titleMedium),
-                const SizedBox(height: 12),
-                Row(
-                  children:
-                      PlayerColor.values.map((color) {
-                        return Expanded(
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(horizontal: 4),
-                            child: _ColorChip(
-                              color: color,
-                              isSelected: _selectedColor == color,
-                              onTap:
-                                  () => setState(() => _selectedColor = color),
-                            ),
-                          ),
-                        );
-                      }).toList(),
-                ),
-                const SizedBox(height: 24),
-
-                // Time control
-                Text(
-                  'Time Control',
-                  style: Theme.of(context).textTheme.titleMedium,
-                ),
-                const SizedBox(height: 12),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: List.generate(AppConstants.timeControls.length, (
-                    index,
-                  ) {
-                    final tc = AppConstants.timeControls[index];
-                    return ChoiceChip(
-                      label: Text(tc.name),
-                      selected: _selectedTimeControlIndex == index,
-                      onSelected:
-                          (_) =>
-                              setState(() => _selectedTimeControlIndex = index),
-                    );
-                  }),
-                ),
-                const SizedBox(height: 32),
-
-                // Start button
-                SizedBox(
-                  width: double.infinity,
-                  height: 56,
-                  child: ElevatedButton(
-                    onPressed: () {
-                      widget.onStartGame(
-                        _selectedElo.round(),
-                        _selectedColor,
-                        AppConstants.timeControls[_selectedTimeControlIndex],
-                      );
-                    },
-                    child: const Text('Start Game'),
-                  ),
-                ),
-                const SizedBox(height: 16),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildHandle() {
-    return Container(
-      margin: const EdgeInsets.only(top: 12),
-      width: 40,
-      height: 4,
-      decoration: BoxDecoration(
-        color: Colors.grey[600],
-        borderRadius: BorderRadius.circular(2),
-      ),
-    );
-  }
-}
-
-// ========== Local Multiplayer Sheet ==========
-
-class _LocalMultiplayerSheet extends ConsumerStatefulWidget {
+class _LocalMultiplayerSheet extends StatefulWidget {
   final Function(TimeControl, bool, bool) onStartGame;
 
   const _LocalMultiplayerSheet({required this.onStartGame});
 
   @override
-  ConsumerState<_LocalMultiplayerSheet> createState() =>
-      _LocalMultiplayerSheetState();
+  State<_LocalMultiplayerSheet> createState() => _LocalMultiplayerSheetState();
 }
 
-class _LocalMultiplayerSheetState
-    extends ConsumerState<_LocalMultiplayerSheet> {
-  bool _useTimer = false;
-  int _selectedTimeControlIndex = 7; // 10+0 default
-  bool _allowTakeback = true;
-  late bool _autoFlip;
-
-  @override
-  void initState() {
-    super.initState();
-    _autoFlip = ref.read(settingsProvider).autoFlipBoard;
-  }
+class _LocalMultiplayerSheetState extends State<_LocalMultiplayerSheet> {
+  TimeControl _selectedTimeControl = AppConstants.timeControls[0];
+  bool _allowTakeback = false;
+  bool _autoFlip = false;
 
   @override
   Widget build(BuildContext context) {
@@ -1147,208 +1095,180 @@ class _LocalMultiplayerSheetState
         color: AppTheme.surfaceDark,
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
+      padding: const EdgeInsets.all(24),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Center(
+            child: Container(
+              width: 40,
+              height: 4,
+              margin: const EdgeInsets.only(bottom: 20),
+              decoration: BoxDecoration(
+                color: Colors.grey[700],
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+          ),
+          Text(
+            'Local Multiplayer',
+            style: GoogleFonts.inter(
+              fontSize: 20,
+              fontWeight: FontWeight.bold,
+              color: AppTheme.textPrimary,
+            ),
+          ),
+          const SizedBox(height: 24),
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            title: const Text('Allow Takeback'),
+            value: _allowTakeback,
+            onChanged: (val) => setState(() => _allowTakeback = val),
+          ),
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            title: const Text('Auto Flip Board'),
+            value: _autoFlip,
+            onChanged: (val) => setState(() => _autoFlip = val),
+          ),
+          const SizedBox(height: 24),
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton(
+              onPressed:
+                  () => widget.onStartGame(
+                    _selectedTimeControl,
+                    _allowTakeback,
+                    _autoFlip,
+                  ),
+              style: ElevatedButton.styleFrom(
+                padding: const EdgeInsets.symmetric(vertical: 16),
+              ),
+              child: const Text('Start Game'),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// Bot Type Selection Sheet
+class _BotTypeSelectionSheet extends StatelessWidget {
+  final Function(BotType) onBotTypeSelected;
+
+  const _BotTypeSelectionSheet({required this.onBotTypeSelected});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.only(top: 10, bottom: 20),
+      decoration: const BoxDecoration(
+        color: AppTheme.surfaceDark,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          _buildHandle(),
+          Container(
+            width: 40,
+            height: 4,
+            decoration: BoxDecoration(
+              color: Colors.grey[700],
+              borderRadius: BorderRadius.circular(2),
+            ),
+          ),
           Padding(
             padding: const EdgeInsets.all(20),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  'Local Multiplayer',
-                  style: Theme.of(context).textTheme.headlineSmall,
-                ),
-                Text(
-                  '2 players on same device',
-                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                    color: AppTheme.textSecondary,
+                  'Select Bot Type',
+                  style: GoogleFonts.inter(
+                    fontSize: 20,
+                    fontWeight: FontWeight.bold,
+                    color: AppTheme.textPrimary,
                   ),
                 ),
-                const SizedBox(height: 24),
-
-                // Timer toggle
-                SwitchListTile(
-                  title: const Text('Use Timer'),
-                  subtitle: const Text('Add time control to the game'),
-                  value: _useTimer,
-                  onChanged: (value) => setState(() => _useTimer = value),
-                  contentPadding: EdgeInsets.zero,
+                const SizedBox(height: 20),
+                _buildBotTypeCard(
+                  context,
+                  botType: BotType.simple,
+                  icon: Icons.psychology_outlined,
+                  color: AppTheme.primaryColor,
+                  onTap: () => onBotTypeSelected(BotType.simple),
                 ),
+                const SizedBox(height: 16),
+                _buildBotTypeCard(
+                  context,
+                  botType: BotType.stockfish,
+                  icon: Icons.rocket_launch_outlined,
+                  color: Colors.red,
+                  onTap: () => onBotTypeSelected(BotType.stockfish),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 
-                if (_useTimer) ...[
-                  const SizedBox(height: 12),
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    children: List.generate(
-                      AppConstants.timeControls.length -
-                          1, // Exclude "No Timer"
-                      (index) {
-                        final tc = AppConstants.timeControls[index + 1];
-                        return ChoiceChip(
-                          label: Text(tc.name),
-                          selected: _selectedTimeControlIndex == index + 1,
-                          onSelected:
-                              (_) => setState(
-                                () => _selectedTimeControlIndex = index + 1,
-                              ),
-                        );
-                      },
+  Widget _buildBotTypeCard(
+    BuildContext context, {
+    required BotType botType,
+    required IconData icon,
+    required Color color,
+    required VoidCallback onTap,
+  }) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.all(20),
+        decoration: BoxDecoration(
+          color: AppTheme.cardDark,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: color.withOpacity(0.5)),
+        ),
+        child: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: color.withOpacity(0.1),
+                shape: BoxShape.circle,
+              ),
+              child: Icon(icon, color: color, size: 32),
+            ),
+            const SizedBox(width: 16),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    botType.displayName,
+                    style: GoogleFonts.inter(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                      color: AppTheme.textPrimary,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    botType.description,
+                    style: GoogleFonts.inter(
+                      fontSize: 14,
+                      color: AppTheme.textSecondary,
                     ),
                   ),
                 ],
-                const SizedBox(height: 16),
-
-                // Takeback toggle
-                SwitchListTile(
-                  title: const Text('Allow Takeback'),
-                  subtitle: const Text('Players can undo moves'),
-                  value: _allowTakeback,
-                  onChanged: (value) => setState(() => _allowTakeback = value),
-                  contentPadding: EdgeInsets.zero,
-                ),
-                const SizedBox(height: 24),
-
-                // Auto Flip toggle
-                SwitchListTile(
-                  title: const Text('Auto Flip Board'),
-                  subtitle: const Text('Flip board after each move'),
-                  value: _autoFlip,
-                  onChanged: (value) => setState(() => _autoFlip = value),
-                  contentPadding: EdgeInsets.zero,
-                ),
-                const SizedBox(height: 24),
-
-                // Start button
-                SizedBox(
-                  width: double.infinity,
-                  height: 56,
-                  child: ElevatedButton(
-                    onPressed: () {
-                      final timeControl =
-                          _useTimer
-                              ? AppConstants
-                                  .timeControls[_selectedTimeControlIndex]
-                              : AppConstants.timeControls[0]; // No Timer
-                      widget.onStartGame(
-                        timeControl,
-                        _allowTakeback,
-                        _autoFlip,
-                      );
-                    },
-                    child: const Text('Start Game'),
-                  ),
-                ),
-                const SizedBox(height: 16),
-              ],
+              ),
             ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildHandle() {
-    return Container(
-      margin: const EdgeInsets.only(top: 12),
-      width: 40,
-      height: 4,
-      decoration: BoxDecoration(
-        color: Colors.grey[600],
-        borderRadius: BorderRadius.circular(2),
-      ),
-    );
-  }
-}
-
-// ========== Load PGN Sheet ==========
-
-class _LoadPGNSheet extends StatefulWidget {
-  final Function(String) onLoad;
-
-  const _LoadPGNSheet({required this.onLoad});
-
-  @override
-  State<_LoadPGNSheet> createState() => _LoadPGNSheetState();
-}
-
-class _LoadPGNSheetState extends State<_LoadPGNSheet> {
-  final _controller = TextEditingController();
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      decoration: const BoxDecoration(
-        color: AppTheme.surfaceDark,
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-      ),
-      padding: EdgeInsets.only(
-        bottom: MediaQuery.of(context).viewInsets.bottom,
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          _buildHandle(),
-          Padding(
-            padding: const EdgeInsets.all(20),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Load from PGN',
-                  style: Theme.of(context).textTheme.headlineSmall,
-                ),
-                const SizedBox(height: 16),
-                TextField(
-                  controller: _controller,
-                  maxLines: 8,
-                  decoration: InputDecoration(
-                    hintText: 'Paste PGN or FEN here...',
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    filled: true,
-                    fillColor: AppTheme.cardDark,
-                  ),
-                ),
-                const SizedBox(height: 16),
-                SizedBox(
-                  width: double.infinity,
-                  height: 48,
-                  child: ElevatedButton(
-                    onPressed: () {
-                      if (_controller.text.isNotEmpty) {
-                        widget.onLoad(_controller.text);
-                      }
-                    },
-                    child: const Text('Load'),
-                  ),
-                ),
-                const SizedBox(height: 16),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildHandle() {
-    return Container(
-      margin: const EdgeInsets.only(top: 12),
-      width: 40,
-      height: 4,
-      decoration: BoxDecoration(
-        color: Colors.grey[600],
-        borderRadius: BorderRadius.circular(2),
+            Icon(Icons.arrow_forward_ios, color: color, size: 20),
+          ],
+        ),
       ),
     );
   }

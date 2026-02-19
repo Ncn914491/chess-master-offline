@@ -228,10 +228,24 @@ class DatabaseService {
     );
   }
 
-  /// Get recent games
-  Future<List<Map<String, dynamic>>> getRecentGames({int limit = 10}) async {
+  /// Get recent games (excluding completed ones for "Continue" section)
+  Future<List<Map<String, dynamic>>> getRecentGames({
+    int limit = 10,
+    bool includeCompleted = true,
+  }) async {
     final db = await database;
-    return await db.query('games', orderBy: 'updated_at DESC', limit: limit);
+
+    String? where;
+    if (!includeCompleted) {
+      where = 'is_completed = 0';
+    }
+
+    return await db.query(
+      'games',
+      where: where,
+      orderBy: 'updated_at DESC',
+      limit: limit,
+    );
   }
 
   /// Get the most recent unfinished game

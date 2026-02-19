@@ -9,13 +9,14 @@ import 'package:chess_master/providers/timer_provider.dart';
 import 'package:chess_master/core/theme/board_themes.dart';
 import 'package:chess_master/screens/game/widgets/chess_board.dart';
 import 'package:chess_master/screens/game/widgets/chess_piece.dart';
-import 'package:chess_master/screens/game/widgets/move_list.dart';
+import 'package:chess_master/screens/game/widgets/move_list.dart'; // Keep for Analysis if needed, but we build custom list here
 import 'package:chess_master/screens/game/widgets/timer_widget.dart';
 import 'package:chess_master/core/constants/app_constants.dart';
 import 'package:chess_master/core/services/database_service.dart';
 import 'package:chess_master/core/services/audio_service.dart';
 import 'package:chess_master/screens/analysis/analysis_screen.dart';
 import 'package:chess_master/screens/settings/settings_screen.dart';
+import 'package:google_fonts/google_fonts.dart';
 
 /// Main game screen for playing chess
 class GameScreen extends ConsumerStatefulWidget {
@@ -29,6 +30,7 @@ class _GameScreenState extends ConsumerState<GameScreen> {
   bool _isBotThinking = false;
   bool _dialogShown = false;
   int _lastMoveCount = 0;
+  final ScrollController _moveListController = ScrollController();
 
   @override
   void initState() {
@@ -41,6 +43,7 @@ class _GameScreenState extends ConsumerState<GameScreen> {
 
   @override
   void dispose() {
+    _moveListController.dispose();
     // Auto-save game when leaving
     _autoSaveGame();
     super.dispose();
@@ -78,6 +81,7 @@ class _GameScreenState extends ConsumerState<GameScreen> {
         'player_color':
             gameState.playerColor == PlayerColor.white ? 'white' : 'black',
         'bot_elo': gameState.difficulty.elo,
+        'game_mode': gameState.isLocalMultiplayer ? 'local' : 'bot',
         'time_control': gameState.timeControl.name,
         'white_time_remaining': timerState.whiteTime.inMilliseconds,
         'black_time_remaining': timerState.blackTime.inMilliseconds,
@@ -87,6 +91,7 @@ class _GameScreenState extends ConsumerState<GameScreen> {
         'updated_at': DateTime.now().millisecondsSinceEpoch,
         'move_count': gameState.moveHistory.length,
         'is_completed': gameState.status == GameStatus.finished ? 1 : 0,
+        'is_saved': 1,
         'hints_used': gameState.hintsUsed,
       });
     } catch (e) {
@@ -139,6 +144,7 @@ class _GameScreenState extends ConsumerState<GameScreen> {
       final result = await engineNotifier.getBotMove(
         fen: gameState.fen,
         difficulty: gameState.difficulty,
+        botType: gameState.botType,
       );
 
       if (result != null && result.isValid) {
@@ -156,6 +162,16 @@ class _GameScreenState extends ConsumerState<GameScreen> {
     }
   }
 
+  void _scrollToLastMove() {
+    if (_moveListController.hasClients) {
+      _moveListController.animateTo(
+        _moveListController.position.maxScrollExtent,
+        duration: const Duration(milliseconds: 300),
+        curve: Curves.easeOut,
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final gameState = ref.watch(gameProvider);
@@ -169,6 +185,7 @@ class _GameScreenState extends ConsumerState<GameScreen> {
       _lastMoveCount = gameState.moveHistory.length;
       WidgetsBinding.instance.addPostFrameCallback((_) {
         ref.read(timerProvider.notifier).switchTurn();
+        _scrollToLastMove();
       });
     }
 
@@ -208,262 +225,303 @@ class _GameScreenState extends ConsumerState<GameScreen> {
 
     return Scaffold(
       backgroundColor: AppTheme.backgroundDark,
-      appBar: _buildAppBar(context, gameState),
       body: SafeArea(
         child: Column(
           children: [
-            // Opponent info bar
-            _buildPlayerBar(
-              context,
-              isOpponent: true,
-              name: 'Bot (${gameState.difficulty.elo})',
-              isActive:
-                  !gameState.isPlayerTurn &&
-                  gameState.status == GameStatus.active,
-              isWhite:
-                  gameState.playerColor ==
-                  PlayerColor.black, // Bot is opposite color
-              isThinking: _isBotThinking,
-            ),
+            // Top Bar (Back button, Title, Settings)
+            _buildCustomAppBar(context, gameState),
 
-            // Captured pieces (opponent)
-            _buildCapturedPieces(gameState, forOpponent: true),
-
-            // Chess board
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 8.0),
-              child: ChessBoard.internal(
-                interactive: gameState.status == GameStatus.active,
-                flipped: gameState.playerColor == PlayerColor.black,
-                onMoveCallback: () {
-                  final gameState = ref.read(gameProvider);
-                  final settings = ref.read(settingsProvider);
-                  final audioService = ref.read(audioServiceProvider);
-
-                  audioService.setEnabled(settings.soundEnabled);
-
-                  if (gameState.moveHistory.isNotEmpty) {
-                    final lastMove = gameState.moveHistory.last;
-                    audioService.playMoveSound(
-                      isCapture: lastMove.isCapture,
-                      isCheck: lastMove.isCheck,
-                      isCheckmate: lastMove.isCheckmate,
-                      isCastle: lastMove.isCastle,
-                    );
-                  }
-
-                  // Trigger bot move
-                  _checkBotMove();
-                },
-              ),
-            ),
-
-            // Captured pieces (player)
-            _buildCapturedPieces(gameState, forOpponent: false),
-
-            // Player info bar
-            _buildPlayerBar(
-              context,
-              isOpponent: false,
-              name:
-                  'You (${gameState.playerColor == PlayerColor.white ? "White" : "Black"})',
-              isActive:
-                  gameState.isPlayerTurn &&
-                  gameState.status == GameStatus.active,
-              isWhite: gameState.playerColor == PlayerColor.white,
-              isThinking: false,
-            ),
-
-            // Move history
             Expanded(
-              child: Container(
-                margin: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  color: AppTheme.cardDark,
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Padding(
-                      padding: const EdgeInsets.all(12),
-                      child: Row(
-                        children: [
-                          const Icon(
-                            Icons.history,
-                            size: 18,
-                            color: AppTheme.textSecondary,
-                          ),
-                          const SizedBox(width: 8),
-                          Text(
-                            'Moves',
-                            style: Theme.of(context).textTheme.titleMedium,
-                          ),
-                          const Spacer(),
-                          Text(
-                            'Move ${gameState.moveNumber}',
-                            style: Theme.of(context).textTheme.bodySmall,
-                          ),
-                        ],
-                      ),
-                    ),
-                    const Divider(height: 1),
-                    Expanded(
-                      child: Padding(
-                        padding: const EdgeInsets.all(8),
-                        child: MoveList(
-                          moves: gameState.moveHistory,
-                          currentMoveIndex: gameState.moveHistory.length - 1,
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  // Opponent Profile
+                  _buildCompactPlayerBar(
+                    context,
+                    isOpponent: true,
+                    name:
+                        gameState.isLocalMultiplayer
+                            ? (gameState.playerColor == PlayerColor.white
+                                ? 'Player 2'
+                                : 'Player 1')
+                            : '${gameState.botType.displayName} (${gameState.difficulty.elo})',
+                    isActive:
+                        !gameState.isPlayerTurn &&
+                        gameState.status == GameStatus.active,
+                    isWhite: gameState.playerColor == PlayerColor.black,
+                    isThinking: _isBotThinking,
+                    gameState: gameState,
+                  ),
+
+                  const SizedBox(height: 12),
+
+                  // Board Area
+                  Container(
+                    decoration: BoxDecoration(
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withOpacity(0.5),
+                          blurRadius: 20,
+                          offset: const Offset(0, 10),
                         ),
+                      ],
+                    ),
+                    child: Container(
+                      decoration: BoxDecoration(
+                        border: Border.all(
+                          color: const Color(0xFFC5A028).withOpacity(0.3),
+                          width: 1,
+                        ), // Muted gold border
+                      ),
+                      child: ChessBoard.internal(
+                        interactive: gameState.status == GameStatus.active,
+                        flipped: gameState.playerColor == PlayerColor.black,
+                        onMoveCallback: () => _onMoveMade(gameState),
                       ),
                     ),
-                  ],
-                ),
+                  ),
+
+                  const SizedBox(height: 12),
+
+                  // Player Profile
+                  _buildCompactPlayerBar(
+                    context,
+                    isOpponent: false,
+                    name:
+                        gameState.isLocalMultiplayer
+                            ? (gameState.playerColor == PlayerColor.white
+                                ? 'Player 1'
+                                : 'Player 2')
+                            : 'You',
+                    isActive:
+                        gameState.isPlayerTurn &&
+                        gameState.status == GameStatus.active,
+                    isWhite: gameState.playerColor == PlayerColor.white,
+                    isThinking: false,
+                    gameState: gameState,
+                  ),
+                ],
               ),
             ),
 
-            // Control buttons
-            _buildControlBar(context, gameState),
+            // Bottom Section: Move Ribbon & Controls
+            Container(
+              color: AppTheme.surfaceDark.withOpacity(0.5),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  // Horizontal Move List
+                  _buildHorizontalMoveList(gameState),
+                  const Divider(height: 1, color: AppTheme.borderColor),
+                  // Controls
+                  _buildControlBar(context, gameState),
+                ],
+              ),
+            ),
           ],
         ),
       ),
     );
   }
 
-  PreferredSizeWidget _buildAppBar(BuildContext context, GameState gameState) {
-    return AppBar(
-      leading: IconButton(
-        icon: const Icon(Icons.arrow_back),
-        onPressed: () => _showExitConfirmation(context),
-      ),
-      title: Column(
+  void _onMoveMade(GameState gameState) {
+    final settings = ref.read(settingsProvider);
+    final audioService = ref.read(audioServiceProvider);
+
+    audioService.setEnabled(settings.soundEnabled);
+
+    if (gameState.moveHistory.isNotEmpty) {
+      final lastMove = gameState.moveHistory.last;
+      audioService.playMoveSound(
+        isCapture: lastMove.isCapture,
+        isCheck: lastMove.isCheck,
+        isCheckmate: lastMove.isCheckmate,
+        isCastle: lastMove.isCastle,
+      );
+    }
+    _checkBotMove();
+  }
+
+  Widget _buildCustomAppBar(BuildContext context, GameState gameState) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      child: Row(
         children: [
-          const Text('Game'),
+          IconButton(
+            onPressed: () => _showExitConfirmation(context),
+            icon: const Icon(Icons.arrow_back, color: AppTheme.textSecondary),
+          ),
+          const Spacer(),
           Text(
             gameState.timeControl.displayString,
-            style: Theme.of(context).textTheme.bodySmall,
+            style: GoogleFonts.inter(
+              fontSize: 14,
+              color: AppTheme.textSecondary,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const Spacer(),
+          IconButton(
+            icon: const Icon(Icons.flip, color: AppTheme.textSecondary),
+            onPressed: () {
+              ref.read(settingsProvider.notifier).toggleBoardFlip();
+            },
+          ),
+          PopupMenuButton<String>(
+            icon: const Icon(Icons.more_vert, color: AppTheme.textSecondary),
+            color: AppTheme.surfaceDark,
+            onSelected: (value) {
+              switch (value) {
+                case 'save_exit':
+                  _saveAndExit(context);
+                  break;
+                case 'settings':
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => const SettingsScreen(),
+                    ),
+                  );
+                  break;
+              }
+            },
+            itemBuilder:
+                (context) => [
+                  PopupMenuItem(
+                    value: 'save_exit',
+                    child: Row(
+                      children: [
+                        const Icon(
+                          Icons.save,
+                          color: AppTheme.textPrimary,
+                          size: 20,
+                        ),
+                        const SizedBox(width: 12),
+                        Text(
+                          'Save & Exit',
+                          style: GoogleFonts.inter(color: AppTheme.textPrimary),
+                        ),
+                      ],
+                    ),
+                  ),
+                  PopupMenuItem(
+                    value: 'settings',
+                    child: Row(
+                      children: [
+                        const Icon(
+                          Icons.settings_outlined,
+                          color: AppTheme.textPrimary,
+                          size: 20,
+                        ),
+                        const SizedBox(width: 12),
+                        Text(
+                          'Settings',
+                          style: GoogleFonts.inter(color: AppTheme.textPrimary),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
           ),
         ],
       ),
-      centerTitle: true,
-      actions: [
-        IconButton(
-          icon: const Icon(Icons.flip),
-          tooltip: 'Flip board',
-          onPressed: () {
-            ref.read(settingsProvider.notifier).toggleBoardFlip();
-          },
-        ),
-        IconButton(
-          icon: const Icon(Icons.settings_outlined),
-          tooltip: 'Settings',
-          onPressed: () {
-            Navigator.push(
-              context,
-              MaterialPageRoute(builder: (context) => const SettingsScreen()),
-            );
-          },
-        ),
-      ],
     );
   }
 
-  Widget _buildPlayerBar(
+  Widget _buildCompactPlayerBar(
     BuildContext context, {
     required bool isOpponent,
     required String name,
     required bool isActive,
     required bool isWhite,
     bool isThinking = false,
+    required GameState gameState,
   }) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
       child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-          // Player avatar
+          // Avatar
           Container(
-            width: 40,
-            height: 40,
+            width: 36,
+            height: 36,
             decoration: BoxDecoration(
+              shape: BoxShape.circle,
               color: isActive ? AppTheme.primaryColor : AppTheme.cardDark,
-              borderRadius: BorderRadius.circular(8),
-              border:
+              border: Border.all(
+                color: isActive ? AppTheme.primaryLight : Colors.transparent,
+                width: 2,
+              ),
+              boxShadow:
                   isActive
-                      ? Border.all(color: AppTheme.primaryLight, width: 2)
+                      ? [
+                        BoxShadow(
+                          color: AppTheme.primaryColor.withOpacity(0.4),
+                          blurRadius: 8,
+                        ),
+                      ]
                       : null,
             ),
             child: Icon(
               isOpponent ? Icons.smart_toy : Icons.person,
-              color: isActive ? Colors.white : AppTheme.textSecondary,
+              color: Colors.white,
+              size: 20,
             ),
           ),
           const SizedBox(width: 12),
-          // Player name
+          // Name & Captures
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
               children: [
                 Text(
                   name,
-                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                    fontWeight: isActive ? FontWeight.bold : FontWeight.normal,
+                  style: GoogleFonts.inter(
+                    fontWeight: FontWeight.bold,
+                    color: AppTheme.textPrimary,
+                    fontSize: 14,
                   ),
                 ),
-                if (isActive && isOpponent)
-                  Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      if (isThinking)
-                        const SizedBox(
-                          width: 12,
-                          height: 12,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2,
-                            color: AppTheme.primaryLight,
-                          ),
-                        ),
-                      if (isThinking) const SizedBox(width: 6),
-                      Text(
-                        isThinking ? 'Thinking...' : 'Your turn',
-                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: AppTheme.primaryLight,
-                        ),
-                      ),
-                    ],
-                  )
-                else if (isActive)
-                  Text(
-                    'Your turn',
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: AppTheme.primaryLight,
-                    ),
-                  ),
+                // Captured Pieces
+                _buildCapturedPiecesCompact(gameState, forOpponent: isOpponent),
               ],
             ),
           ),
-          // Timer widget
-          ChessTimerWidget(isWhite: isWhite, isActive: isActive),
+          // Timer
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+            decoration: BoxDecoration(
+              color: AppTheme.cardDark,
+              borderRadius: BorderRadius.circular(8),
+              border:
+                  isActive
+                      ? Border.all(color: AppTheme.primaryColor, width: 1)
+                      : null,
+            ),
+            child: ChessTimerWidget(isWhite: isWhite, isActive: isActive),
+          ),
         ],
       ),
     );
   }
 
-  Widget _buildCapturedPieces(
+  Widget _buildCapturedPiecesCompact(
     GameState gameState, {
     required bool forOpponent,
   }) {
-    // Access settings to get current piece set
     final settings = ref.watch(settingsProvider);
-    final pieceSet = settings.currentPieceSet;
 
-    // Calculate captured pieces
-    final whiteCaptures = <String>[];
-    final blackCaptures = <String>[];
+    // Calculate captured pieces and material advantage
+    final whiteCaptures = <String>[]; // Pieces captured BY white (black pieces)
+    final blackCaptures = <String>[]; // Pieces captured BY black (white pieces)
 
     for (int i = 0; i < gameState.moveHistory.length; i++) {
       final move = gameState.moveHistory[i];
       if (move.capturedPiece != null) {
-        // White moves on even indices (0, 2, ...), Black on odd (1, 3, ...)
+        // Even index (0, 2, 4...) = White's move, so white captured a black piece
+        // Odd index (1, 3, 5...) = Black's move, so black captured a white piece
         if (i % 2 == 0) {
           // White captured a black piece
           whiteCaptures.add('b${move.capturedPiece!.toUpperCase()}');
@@ -474,116 +532,235 @@ class _GameScreenState extends ConsumerState<GameScreen> {
       }
     }
 
-    // Sort function: P < N < B < R < Q
-    int getPieceValue(String pieceCode) {
-      final type = pieceCode.substring(1);
-      switch (type) {
+    // Calculate material values
+    int getMaterialValue(String piece) {
+      final pieceType = piece.substring(1); // Remove color prefix
+      switch (pieceType) {
         case 'P':
           return 1;
         case 'N':
-          return 2;
+          return 3;
         case 'B':
           return 3;
         case 'R':
-          return 4;
-        case 'Q':
           return 5;
+        case 'Q':
+          return 9;
         default:
           return 0;
       }
     }
 
+    final whiteMaterial = whiteCaptures.fold<int>(
+      0,
+      (sum, piece) => sum + getMaterialValue(piece),
+    );
+    final blackMaterial = blackCaptures.fold<int>(
+      0,
+      (sum, piece) => sum + getMaterialValue(piece),
+    );
+
+    // Sort captures by value
+    int getPieceValue(String p) =>
+        {'P': 1, 'N': 2, 'B': 3, 'R': 4, 'Q': 5}[p.substring(1)] ?? 0;
     whiteCaptures.sort((a, b) => getPieceValue(a).compareTo(getPieceValue(b)));
     blackCaptures.sort((a, b) => getPieceValue(a).compareTo(getPieceValue(b)));
 
-    // Determine which list to show
+    // Determine which pieces to show based on player perspective
     List<String> piecesToShow;
-    // Note: In local multiplayer, playerColor is usually white (bottom),
-    // so opponent (top) is black.
-    // The logic below assumes "Player" is bottom and "Opponent" is top.
+    int materialAdvantage;
 
-    if (forOpponent) {
-      // Opponent's captured pieces (what the opponent captured)
-      if (gameState.playerColor == PlayerColor.white) {
-        // I am White, Opponent is Black. Show what Black captured.
-        piecesToShow = blackCaptures;
+    if (gameState.isLocalMultiplayer) {
+      // In local multiplayer, show pieces captured by each player
+      if (forOpponent) {
+        // Opponent's captures
+        piecesToShow =
+            gameState.playerColor == PlayerColor.white
+                ? blackCaptures
+                : whiteCaptures;
+        materialAdvantage =
+            gameState.playerColor == PlayerColor.white
+                ? blackMaterial - whiteMaterial
+                : whiteMaterial - blackMaterial;
       } else {
-        // I am Black, Opponent is White. Show what White captured.
-        piecesToShow = whiteCaptures;
+        // Current player's captures
+        piecesToShow =
+            gameState.playerColor == PlayerColor.white
+                ? whiteCaptures
+                : blackCaptures;
+        materialAdvantage =
+            gameState.playerColor == PlayerColor.white
+                ? whiteMaterial - blackMaterial
+                : blackMaterial - whiteMaterial;
       }
     } else {
-      // Player's captured pieces (what I captured)
-      if (gameState.playerColor == PlayerColor.white) {
-        piecesToShow = whiteCaptures;
+      // In bot games, show pieces captured by each side
+      if (forOpponent) {
+        // Bot's captures (pieces bot captured from player)
+        piecesToShow =
+            gameState.playerColor == PlayerColor.white
+                ? blackCaptures
+                : whiteCaptures;
+        materialAdvantage =
+            gameState.playerColor == PlayerColor.white
+                ? blackMaterial - whiteMaterial
+                : whiteMaterial - blackMaterial;
       } else {
-        piecesToShow = blackCaptures;
+        // Player's captures (pieces player captured from bot)
+        piecesToShow =
+            gameState.playerColor == PlayerColor.white
+                ? whiteCaptures
+                : blackCaptures;
+        materialAdvantage =
+            gameState.playerColor == PlayerColor.white
+                ? whiteMaterial - blackMaterial
+                : blackMaterial - whiteMaterial;
       }
     }
 
+    return SizedBox(
+      height: 14,
+      child: Row(
+        children: [
+          // Captured pieces
+          if (piecesToShow.isNotEmpty)
+            Flexible(
+              child: ListView.builder(
+                scrollDirection: Axis.horizontal,
+                shrinkWrap: true,
+                itemCount: piecesToShow.length,
+                itemBuilder: (context, index) {
+                  final piece = piecesToShow[index];
+                  final isBlackPiece = piece.startsWith('b');
+
+                  return Padding(
+                    padding: const EdgeInsets.only(right: 2),
+                    child: Container(
+                      decoration: BoxDecoration(
+                        color:
+                            isBlackPiece
+                                ? Colors.white.withOpacity(0.9)
+                                : Colors.black.withOpacity(0.7),
+                        borderRadius: BorderRadius.circular(2),
+                      ),
+                      padding: const EdgeInsets.all(1),
+                      child: ChessPiece(
+                        piece: piece,
+                        size: 12,
+                        pieceSet: settings.currentPieceSet,
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
+
+          // Material advantage indicator
+          if (materialAdvantage > 0) ...[
+            const SizedBox(width: 4),
+            Text(
+              '+$materialAdvantage',
+              style: const TextStyle(
+                color: Colors.greenAccent,
+                fontSize: 11,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ],
+
+          // Placeholder if no captures
+          if (piecesToShow.isEmpty && materialAdvantage == 0)
+            const SizedBox.shrink(),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildHorizontalMoveList(GameState gameState) {
     return Container(
-      height: 32,
-      padding: const EdgeInsets.symmetric(horizontal: 16),
-      alignment: Alignment.centerLeft,
-      child: SingleChildScrollView(
+      height: 56,
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: ListView.separated(
+        controller: _moveListController,
+        padding: const EdgeInsets.symmetric(horizontal: 16),
         scrollDirection: Axis.horizontal,
-        child: Row(
-          children:
-              piecesToShow.map((piece) {
-                return Padding(
-                  padding: const EdgeInsets.only(right: 2),
-                  child: ChessPiece(piece: piece, size: 20, pieceSet: pieceSet),
-                );
-              }).toList(),
-        ),
+        itemCount: (gameState.moveHistory.length / 2).ceil(),
+        separatorBuilder: (_, __) => const SizedBox(width: 8),
+        itemBuilder: (context, index) {
+          final moveNum = index + 1;
+          final whiteIndex = index * 2;
+          final blackIndex = index * 2 + 1;
+          final whiteMove = gameState.moveHistory[whiteIndex];
+          final blackMove =
+              blackIndex < gameState.moveHistory.length
+                  ? gameState.moveHistory[blackIndex]
+                  : null;
+
+          return Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+            decoration: BoxDecoration(
+              color: AppTheme.cardDark,
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: AppTheme.borderColor),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  '$moveNum.',
+                  style: GoogleFonts.inter(
+                    color: AppTheme.textSecondary,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                const SizedBox(width: 6),
+                Text(
+                  whiteMove.san,
+                  style: GoogleFonts.inter(color: AppTheme.textPrimary),
+                ),
+                if (blackMove != null) ...[
+                  const SizedBox(width: 6),
+                  Text(
+                    blackMove.san,
+                    style: GoogleFonts.inter(color: AppTheme.textPrimary),
+                  ),
+                ],
+              ],
+            ),
+          );
+        },
       ),
     );
   }
 
   Widget _buildControlBar(BuildContext context, GameState gameState) {
+    final valid = gameState.status == GameStatus.active;
     final gameNotifier = ref.read(gameProvider.notifier);
 
-    return Container(
-      padding: const EdgeInsets.all(12),
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 12, 12, 16),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceEvenly,
         children: [
-          // Hint button
           _ControlButton(
             icon: Icons.lightbulb_outline,
             label: 'Hint',
-            onPressed:
-                gameState.canRequestHint && gameState.isPlayerTurn
-                    ? _requestHint
-                    : null,
+            onPressed: (valid && gameState.isPlayerTurn) ? _requestHint : null,
           ),
-          // Undo button
           _ControlButton(
             icon: Icons.undo,
             label: 'Undo',
-            onPressed:
-                gameState.canUndo
-                    ? () {
-                      gameNotifier.undoMove();
-                    }
-                    : null,
+            onPressed: (gameState.canUndo) ? gameNotifier.undoMove : null,
           ),
-          // Draw button
           _ControlButton(
             icon: Icons.handshake_outlined,
             label: 'Draw',
-            onPressed:
-                gameState.status == GameStatus.active
-                    ? () => _showDrawConfirmation(context)
-                    : null,
+            onPressed: (valid) ? () => _showDrawConfirmation(context) : null,
           ),
-          // Resign button
           _ControlButton(
             icon: Icons.flag_outlined,
             label: 'Resign',
-            onPressed:
-                gameState.status == GameStatus.active
-                    ? () => _showResignConfirmation(context)
-                    : null,
+            onPressed: (valid) ? () => _showResignConfirmation(context) : null,
           ),
         ],
       ),
@@ -600,6 +777,7 @@ class _GameScreenState extends ConsumerState<GameScreen> {
       context: context,
       builder:
           (context) => AlertDialog(
+            backgroundColor: AppTheme.surfaceDark,
             title: const Text('Leave Game?'),
             content: const Text('Your progress will be saved automatically.'),
             actions: [
@@ -619,11 +797,39 @@ class _GameScreenState extends ConsumerState<GameScreen> {
     );
   }
 
+  Future<void> _saveAndExit(BuildContext context) async {
+    // Save the game
+    await _autoSaveGame();
+
+    // Show confirmation
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Game saved successfully',
+            style: GoogleFonts.inter(color: Colors.white),
+          ),
+          backgroundColor: Colors.green,
+          duration: const Duration(seconds: 2),
+        ),
+      );
+
+      // Wait a moment for the snackbar to show
+      await Future.delayed(const Duration(milliseconds: 500));
+
+      // Exit to home
+      if (mounted) {
+        Navigator.pop(context);
+      }
+    }
+  }
+
   void _showResignConfirmation(BuildContext context) {
     showDialog(
       context: context,
       builder:
           (context) => AlertDialog(
+            backgroundColor: AppTheme.surfaceDark,
             title: const Text('Resign?'),
             content: const Text('Are you sure you want to resign this game?'),
             actions: [
@@ -651,6 +857,7 @@ class _GameScreenState extends ConsumerState<GameScreen> {
       context: context,
       builder:
           (context) => AlertDialog(
+            backgroundColor: AppTheme.surfaceDark,
             title: const Text('Offer Draw?'),
             content: const Text('The bot will consider your draw offer.'),
             actions: [
@@ -683,6 +890,7 @@ class _GameScreenState extends ConsumerState<GameScreen> {
       barrierDismissible: false,
       builder:
           (context) => AlertDialog(
+            backgroundColor: AppTheme.surfaceDark,
             title: Row(
               children: [
                 Icon(
@@ -706,6 +914,7 @@ class _GameScreenState extends ConsumerState<GameScreen> {
                       : isDraw
                       ? 'Draw'
                       : 'Defeat',
+                  style: GoogleFonts.inter(fontWeight: FontWeight.bold),
                 ),
               ],
             ),
@@ -713,7 +922,10 @@ class _GameScreenState extends ConsumerState<GameScreen> {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(gameState.resultReason ?? ''),
+                Text(
+                  gameState.resultReason ?? '',
+                  style: TextStyle(color: AppTheme.textPrimary),
+                ),
                 const SizedBox(height: 16),
                 Text(
                   '${gameState.moveHistory.length} moves played',
@@ -724,22 +936,38 @@ class _GameScreenState extends ConsumerState<GameScreen> {
             actions: [
               TextButton(
                 onPressed: () {
-                  Navigator.pop(context);
-                  Navigator.pop(context);
+                  Navigator.pop(context); // Dialog
+                  Navigator.pop(context); // Game Screen
                 },
                 child: const Text('Home'),
               ),
               TextButton(
                 onPressed: () {
                   Navigator.pop(context);
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder:
-                          (context) =>
-                              AnalysisScreen(moves: gameState.moveHistory),
-                    ),
-                  );
+                  // Ensure we have moves before navigating
+                  if (gameState.moveHistory.isNotEmpty) {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder:
+                            (context) => AnalysisScreen(
+                              moves: gameState.moveHistory,
+                              startingFen:
+                                  'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1',
+                            ),
+                      ),
+                    );
+                  } else {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text(
+                          'No moves to analyze',
+                          style: GoogleFonts.inter(color: Colors.white),
+                        ),
+                        backgroundColor: Colors.orange,
+                      ),
+                    );
+                  }
                 },
                 child: const Text('Analyze'),
               ),
@@ -794,27 +1022,23 @@ class _ControlButton extends StatelessWidget {
               children: [
                 Icon(
                   icon,
-                  size: 28,
+                  size: 24,
                   color: isEnabled ? AppTheme.textPrimary : AppTheme.textHint,
                 ),
                 if (badge != null)
                   Positioned(
-                    right: -8,
+                    right: -4,
                     top: -4,
                     child: Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 4,
-                        vertical: 2,
-                      ),
-                      decoration: BoxDecoration(
-                        color: AppTheme.primaryColor,
-                        borderRadius: BorderRadius.circular(8),
+                      padding: const EdgeInsets.all(2),
+                      decoration: const BoxDecoration(
+                        color: Colors.red,
+                        shape: BoxShape.circle,
                       ),
                       child: Text(
                         badge!,
                         style: const TextStyle(
-                          fontSize: 10,
-                          fontWeight: FontWeight.bold,
+                          fontSize: 8,
                           color: Colors.white,
                         ),
                       ),
@@ -825,9 +1049,9 @@ class _ControlButton extends StatelessWidget {
             const SizedBox(height: 4),
             Text(
               label,
-              style: TextStyle(
-                fontSize: 12,
-                color: isEnabled ? AppTheme.textSecondary : AppTheme.textHint,
+              style: GoogleFonts.inter(
+                fontSize: 10,
+                color: isEnabled ? AppTheme.textPrimary : AppTheme.textHint,
               ),
             ),
           ],

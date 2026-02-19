@@ -7,25 +7,26 @@ import 'package:chess_master/providers/puzzle_provider.dart';
 import 'package:chess_master/screens/game/widgets/chess_board.dart';
 import 'package:google_fonts/google_fonts.dart';
 
-/// Puzzle training screen
-class PuzzleScreen extends ConsumerStatefulWidget {
-  const PuzzleScreen({super.key});
+/// Daily puzzle screen - special UI for daily challenge
+class DailyPuzzleScreen extends ConsumerStatefulWidget {
+  const DailyPuzzleScreen({super.key});
 
   @override
-  ConsumerState<PuzzleScreen> createState() => _PuzzleScreenState();
+  ConsumerState<DailyPuzzleScreen> createState() => _DailyPuzzleScreenState();
 }
 
-class _PuzzleScreenState extends ConsumerState<PuzzleScreen> {
+class _DailyPuzzleScreenState extends ConsumerState<DailyPuzzleScreen> {
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      _initializePuzzles();
+      _initializeDailyPuzzle();
     });
   }
 
-  Future<void> _initializePuzzles() async {
+  Future<void> _initializeDailyPuzzle() async {
     final notifier = ref.read(puzzleProvider.notifier);
+    notifier.setModeConfig(mode: PuzzleFilterMode.daily);
     await notifier.initialize();
     await notifier.startNewPuzzle();
   }
@@ -40,95 +41,63 @@ class _PuzzleScreenState extends ConsumerState<PuzzleScreen> {
         backgroundColor: Colors.transparent,
         elevation: 0,
         centerTitle: true,
-        title: Text(
-          'Puzzle Trainer',
-          style: GoogleFonts.inter(fontWeight: FontWeight.bold),
+        title: Column(
+          children: [
+            Text(
+              'Daily Puzzle',
+              style: GoogleFonts.inter(fontWeight: FontWeight.bold),
+            ),
+            Text(
+              _getFormattedDate(),
+              style: GoogleFonts.inter(
+                fontSize: 12,
+                color: AppTheme.textSecondary,
+              ),
+            ),
+          ],
         ),
-        actions: [
-          // Rating display
-          Container(
-            margin: const EdgeInsets.only(right: 16),
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-            decoration: BoxDecoration(
-              color: AppTheme.cardDark,
-              borderRadius: BorderRadius.circular(20),
-              border: Border.all(color: AppTheme.borderColor),
-            ),
-            child: Row(
-              children: [
-                const Icon(Icons.emoji_events, color: Colors.amber, size: 18),
-                const SizedBox(width: 8),
-                Text(
-                  '${state.currentRating}',
-                  style: GoogleFonts.inter(
-                    color: AppTheme.textPrimary,
-                    fontWeight: FontWeight.bold,
-                    fontSize: 14,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
       ),
       body: _buildBody(state),
     );
   }
 
+  String _getFormattedDate() {
+    final now = DateTime.now();
+    final months = [
+      'Jan',
+      'Feb',
+      'Mar',
+      'Apr',
+      'May',
+      'Jun',
+      'Jul',
+      'Aug',
+      'Sep',
+      'Oct',
+      'Nov',
+      'Dec',
+    ];
+    return '${months[now.month - 1]} ${now.day}, ${now.year}';
+  }
+
   Widget _buildBody(PuzzleGameState state) {
-    if (state.isLoading) {
+    if (state.isLoading || state.currentPuzzle == null) {
       return const Center(
         child: CircularProgressIndicator(color: AppTheme.primaryColor),
       );
     }
 
-    if (state.errorMessage != null && state.currentPuzzle == null) {
-      return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(Icons.error_outline, color: AppTheme.error, size: 48),
-            const SizedBox(height: 16),
-            Text(
-              state.errorMessage!,
-              style: GoogleFonts.inter(color: AppTheme.textSecondary),
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: 24),
-            ElevatedButton(
-              onPressed: _initializePuzzles,
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppTheme.primaryColor,
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 24,
-                  vertical: 12,
-                ),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
-                ),
-              ),
-              child: Text(
-                'Retry',
-                style: GoogleFonts.inter(fontWeight: FontWeight.bold),
-              ),
-            ),
-          ],
-        ),
-      );
-    }
-
-    if (state.currentPuzzle == null || state.board == null) {
-      return const Center(
-        child: CircularProgressIndicator(color: AppTheme.primaryColor),
-      );
+    // Show completion screen
+    if (state.state == PuzzleState.completed) {
+      return _buildCompletionScreen(state);
     }
 
     return Column(
       children: [
-        // Puzzle info with gradient card
+        // Puzzle info
         Padding(
           padding: const EdgeInsets.all(16),
-          child: _buildPuzzleInfoCard(state),
+          child: _buildDailyPuzzleInfo(state),
         ),
 
         // To play indicator
@@ -148,10 +117,8 @@ class _PuzzleScreenState extends ConsumerState<PuzzleScreen> {
         ),
         const SizedBox(height: 16),
 
-        // Status message
+        // Status messages
         if (state.errorMessage != null) _buildErrorMessage(state.errorMessage!),
-
-        // Success message with animation
         if (state.state == PuzzleState.correct) _buildSuccessMessage(),
 
         const SizedBox(height: 8),
@@ -160,217 +127,38 @@ class _PuzzleScreenState extends ConsumerState<PuzzleScreen> {
         Expanded(
           child: Center(
             child: Padding(
-              padding: const EdgeInsets.symmetric(
-                horizontal: 0,
-              ), // Maximize width
+              padding: const EdgeInsets.symmetric(horizontal: 0),
               child: AspectRatio(
                 aspectRatio: 1.0,
-                child: _PuzzleBoard(state: state, ref: ref),
+                child: _DailyPuzzleBoard(state: state, ref: ref),
               ),
             ),
           ),
         ),
 
-        // Controls
+        // Controls (only hint and solution, no skip)
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 24, 16, 32),
-          child: _buildControls(state),
+          child: _buildDailyControls(state),
         ),
       ],
     );
   }
 
-  Widget _buildControls(PuzzleGameState state) {
-    final notifier = ref.read(puzzleProvider.notifier);
-    final isCompleted = state.state == PuzzleState.completed;
-
-    if (isCompleted) {
-      return Row(
-        children: [
-          Expanded(
-            child: OutlinedButton.icon(
-              onPressed: () => notifier.retryPuzzle(),
-              icon: const Icon(Icons.replay),
-              label: const Text('Retry'),
-              style: OutlinedButton.styleFrom(
-                foregroundColor: AppTheme.textPrimary,
-                side: const BorderSide(color: AppTheme.textHint),
-                padding: const EdgeInsets.symmetric(vertical: 16),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                textStyle: GoogleFonts.inter(fontWeight: FontWeight.w600),
-              ),
-            ),
-          ),
-          const SizedBox(width: 16),
-          Expanded(
-            child: ElevatedButton.icon(
-              onPressed: () => notifier.nextPuzzle(),
-              icon: const Icon(Icons.arrow_forward),
-              label: const Text('Next Puzzle'),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppTheme.primaryColor,
-                foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(vertical: 16),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                elevation: 4,
-                textStyle: GoogleFonts.inter(fontWeight: FontWeight.bold),
-              ),
-            ),
-          ),
-        ],
-      );
-    }
-
-    return Column(
-      children: [
-        // First row: Hint and Show Solution
-        Row(
-          children: [
-            // Hint button - no limit
-            Expanded(
-              child: OutlinedButton.icon(
-                onPressed:
-                    state.isPlayerTurn && !state.showingHint
-                        ? () => notifier.showHint()
-                        : null,
-                icon: const Icon(Icons.lightbulb_outline, size: 20),
-                label: const Text('Hint'),
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: Colors.amber,
-                  side: BorderSide(color: Colors.amber.withOpacity(0.5)),
-                  padding: const EdgeInsets.symmetric(vertical: 14),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  textStyle: GoogleFonts.inter(fontWeight: FontWeight.w600),
-                ),
-              ),
-            ),
-            const SizedBox(width: 12),
-            // Show Solution button
-            Expanded(
-              child: OutlinedButton.icon(
-                onPressed: () => _showSolutionDialog(state),
-                icon: const Icon(Icons.visibility_outlined, size: 20),
-                label: const Text('Solution'),
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: Colors.blue,
-                  side: BorderSide(color: Colors.blue.withOpacity(0.5)),
-                  padding: const EdgeInsets.symmetric(vertical: 14),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  textStyle: GoogleFonts.inter(fontWeight: FontWeight.w600),
-                ),
-              ),
-            ),
-            const SizedBox(width: 12),
-            // Skip button
-            Expanded(
-              child: OutlinedButton.icon(
-                onPressed: () => _showSkipConfirmation(),
-                icon: const Icon(Icons.skip_next, size: 20),
-                label: const Text('Skip'),
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: AppTheme.textSecondary,
-                  side: BorderSide(color: AppTheme.borderColor),
-                  padding: const EdgeInsets.symmetric(vertical: 14),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  textStyle: GoogleFonts.inter(fontWeight: FontWeight.w600),
-                ),
-              ),
-            ),
-          ],
-        ),
-      ],
-    );
-  }
-
-  void _showSolutionDialog(PuzzleGameState state) {
-    final puzzle = state.currentPuzzle;
-    if (puzzle == null) return;
-
-    // Navigate to auto-play solution screen
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (context) => _AutoPlaySolutionScreen(puzzle: puzzle),
-      ),
-    );
-  }
-
-  void _showSkipConfirmation() {
-    showDialog(
-      context: context,
-      builder:
-          (context) => AlertDialog(
-            backgroundColor: AppTheme.surfaceDark,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(16),
-            ),
-            title: Text(
-              'Skip Puzzle?',
-              style: GoogleFonts.inter(fontWeight: FontWeight.bold),
-            ),
-            content: Text(
-              'Skipping will count as an incorrect attempt and may lower your rating.',
-              style: GoogleFonts.inter(color: AppTheme.textSecondary),
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(context),
-                child: Text(
-                  'Cancel',
-                  style: GoogleFonts.inter(color: AppTheme.textSecondary),
-                ),
-              ),
-              ElevatedButton(
-                onPressed: () {
-                  Navigator.pop(context);
-                  ref.read(puzzleProvider.notifier).skipPuzzle();
-                },
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppTheme.error,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                ),
-                child: Text(
-                  'Skip',
-                  style: GoogleFonts.inter(
-                    color: Colors.white,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-              ),
-            ],
-          ),
-    );
-  }
-
-  Widget _buildPuzzleInfoCard(PuzzleGameState state) {
+  Widget _buildDailyPuzzleInfo(PuzzleGameState state) {
     final puzzle = state.currentPuzzle!;
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
         gradient: LinearGradient(
-          colors: [
-            AppTheme.primaryColor,
-            AppTheme.primaryColor.withOpacity(0.7),
-          ],
+          colors: [Colors.orange.shade800, Colors.orange.shade600],
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
         ),
         borderRadius: BorderRadius.circular(16),
         boxShadow: [
           BoxShadow(
-            color: AppTheme.primaryColor.withOpacity(0.3),
+            color: Colors.orange.withValues(alpha: 0.3),
             blurRadius: 12,
             offset: const Offset(0, 6),
           ),
@@ -381,10 +169,14 @@ class _PuzzleScreenState extends ConsumerState<PuzzleScreen> {
           Container(
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
-              color: Colors.white.withOpacity(0.2),
+              color: Colors.white.withValues(alpha: 0.2),
               shape: BoxShape.circle,
             ),
-            child: const Icon(Icons.extension, color: Colors.white, size: 28),
+            child: const Icon(
+              Icons.calendar_today,
+              color: Colors.white,
+              size: 28,
+            ),
           ),
           const SizedBox(width: 16),
           Expanded(
@@ -392,7 +184,7 @@ class _PuzzleScreenState extends ConsumerState<PuzzleScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  'Puzzle #${state.puzzleQueue.length + 1}',
+                  'Daily Challenge',
                   style: GoogleFonts.inter(
                     color: Colors.white,
                     fontSize: 18,
@@ -403,43 +195,12 @@ class _PuzzleScreenState extends ConsumerState<PuzzleScreen> {
                 Text(
                   'Rating: ${puzzle.rating} • ${puzzle.themes.join(", ")}',
                   style: GoogleFonts.inter(
-                    color: Colors.white.withOpacity(0.9),
+                    color: Colors.white.withValues(alpha: 0.9),
                     fontSize: 13,
                   ),
                 ),
               ],
             ),
-          ),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              Row(
-                children: [
-                  const Icon(
-                    Icons.local_fire_department,
-                    color: Colors.orange,
-                    size: 18,
-                  ),
-                  const SizedBox(width: 4),
-                  Text(
-                    '${state.streak}',
-                    style: GoogleFonts.inter(
-                      color: Colors.white,
-                      fontSize: 16,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 4),
-              Text(
-                'Hints: ${state.hintsUsed}',
-                style: GoogleFonts.inter(
-                  color: Colors.white.withOpacity(0.8),
-                  fontSize: 12,
-                ),
-              ),
-            ],
           ),
         ],
       ),
@@ -451,9 +212,9 @@ class _PuzzleScreenState extends ConsumerState<PuzzleScreen> {
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: AppTheme.error.withOpacity(0.1),
+        color: AppTheme.error.withValues(alpha: 0.1),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: AppTheme.error.withOpacity(0.3)),
+        border: Border.all(color: AppTheme.error.withValues(alpha: 0.3)),
       ),
       child: Row(
         children: [
@@ -462,10 +223,7 @@ class _PuzzleScreenState extends ConsumerState<PuzzleScreen> {
           Expanded(
             child: Text(
               message,
-              style: GoogleFonts.inter(
-                color: AppTheme.error,
-                fontWeight: FontWeight.w600,
-              ),
+              style: GoogleFonts.inter(color: AppTheme.error),
             ),
           ),
         ],
@@ -478,16 +236,9 @@ class _PuzzleScreenState extends ConsumerState<PuzzleScreen> {
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: Colors.green.withOpacity(0.1),
+        color: Colors.green.withValues(alpha: 0.1),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.green.withOpacity(0.3)),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.green.withOpacity(0.2),
-            blurRadius: 8,
-            offset: const Offset(0, 2),
-          ),
-        ],
+        border: Border.all(color: Colors.green.withValues(alpha: 0.3)),
       ),
       child: Row(
         children: [
@@ -504,21 +255,202 @@ class _PuzzleScreenState extends ConsumerState<PuzzleScreen> {
       ),
     );
   }
+
+  Widget _buildDailyControls(PuzzleGameState state) {
+    final notifier = ref.read(puzzleProvider.notifier);
+
+    return Row(
+      children: [
+        // Hint button
+        Expanded(
+          child: OutlinedButton.icon(
+            onPressed:
+                state.isPlayerTurn && !state.showingHint
+                    ? () => notifier.showHint()
+                    : null,
+            icon: const Icon(Icons.lightbulb_outline, size: 20),
+            label: const Text('Hint'),
+            style: OutlinedButton.styleFrom(
+              foregroundColor: Colors.amber,
+              side: BorderSide(color: Colors.amber.withValues(alpha: 0.5)),
+              padding: const EdgeInsets.symmetric(vertical: 14),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+              textStyle: GoogleFonts.inter(fontWeight: FontWeight.w600),
+            ),
+          ),
+        ),
+        const SizedBox(width: 12),
+        // Show Solution button
+        Expanded(
+          child: OutlinedButton.icon(
+            onPressed: () => _showAutoPlaySolution(state),
+            icon: const Icon(Icons.play_arrow, size: 20),
+            label: const Text('Solution'),
+            style: OutlinedButton.styleFrom(
+              foregroundColor: Colors.blue,
+              side: BorderSide(color: Colors.blue.withValues(alpha: 0.5)),
+              padding: const EdgeInsets.symmetric(vertical: 14),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+              textStyle: GoogleFonts.inter(fontWeight: FontWeight.w600),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildCompletionScreen(PuzzleGameState state) {
+    final puzzle = state.currentPuzzle!;
+    final accuracy = state.accuracy;
+
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(32),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            // Trophy icon with animation
+            Container(
+              padding: const EdgeInsets.all(24),
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                gradient: LinearGradient(
+                  colors: [Colors.amber.shade400, Colors.orange.shade600],
+                ),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.amber.withValues(alpha: 0.5),
+                    blurRadius: 30,
+                    spreadRadius: 5,
+                  ),
+                ],
+              ),
+              child: const Icon(
+                Icons.emoji_events,
+                size: 80,
+                color: Colors.white,
+              ),
+            ),
+            const SizedBox(height: 32),
+            Text(
+              'Congratulations!',
+              style: GoogleFonts.inter(
+                fontSize: 32,
+                fontWeight: FontWeight.bold,
+                color: AppTheme.textPrimary,
+              ),
+            ),
+            const SizedBox(height: 12),
+            Text(
+              'You completed today\'s puzzle!',
+              style: GoogleFonts.inter(
+                fontSize: 16,
+                color: AppTheme.textSecondary,
+              ),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 32),
+            // Stats
+            Container(
+              padding: const EdgeInsets.all(24),
+              decoration: BoxDecoration(
+                color: AppTheme.cardDark,
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: AppTheme.borderColor),
+              ),
+              child: Column(
+                children: [
+                  _buildStatRow('Puzzle Rating', '${puzzle.rating}'),
+                  const Divider(height: 24, color: AppTheme.borderColor),
+                  _buildStatRow(
+                    'Your Accuracy',
+                    '${accuracy.toStringAsFixed(0)}%',
+                  ),
+                  const Divider(height: 24, color: AppTheme.borderColor),
+                  _buildStatRow('Hints Used', '${state.hintsUsed}'),
+                ],
+              ),
+            ),
+            const SizedBox(height: 32),
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton.icon(
+                onPressed: () => Navigator.pop(context),
+                icon: const Icon(Icons.check_circle),
+                label: const Text('Done'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppTheme.primaryColor,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(vertical: 16),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  elevation: 4,
+                  textStyle: GoogleFonts.inter(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 16,
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildStatRow(String label, String value) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        Text(
+          label,
+          style: GoogleFonts.inter(color: AppTheme.textSecondary, fontSize: 14),
+        ),
+        Text(
+          value,
+          style: GoogleFonts.inter(
+            color: AppTheme.textPrimary,
+            fontSize: 16,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+      ],
+    );
+  }
+
+  void _showAutoPlaySolution(PuzzleGameState state) {
+    // Navigate to auto-play solution screen
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder:
+            (context) => _AutoPlaySolutionScreen(puzzle: state.currentPuzzle!),
+      ),
+    );
+  }
 }
 
-/// Puzzle chess board
-class _PuzzleBoard extends StatelessWidget {
+/// Daily puzzle board widget
+class _DailyPuzzleBoard extends StatelessWidget {
   final PuzzleGameState state;
   final WidgetRef ref;
 
-  const _PuzzleBoard({required this.state, required this.ref});
+  const _DailyPuzzleBoard({required this.state, required this.ref});
 
   @override
   Widget build(BuildContext context) {
-    // Determine if board should be flipped based on puzzle starting position
-    // Board should stay oriented to the side that's solving the puzzle
+    // Board should NOT flip - keep player's perspective consistent
     final puzzle = state.currentPuzzle;
-    final isFlipped = puzzle != null && puzzle.fen.contains(' b ');
+    if (puzzle == null) return const SizedBox();
+
+    // Determine orientation from initial FEN
+    // If puzzle starts with black to move, flip board
+    final isFlipped = puzzle.fen.contains(' b ');
 
     // Build hint move in UCI format for arrow display
     String? hintMove;
@@ -549,7 +481,6 @@ class _PuzzleBoard extends StatelessWidget {
               ? (from, to) async {
                 final notifier = ref.read(puzzleProvider.notifier);
 
-                // Check for promotion
                 if (notifier.needsPromotion(from, to)) {
                   final promotion = await _showPromotionDialog(
                     context,

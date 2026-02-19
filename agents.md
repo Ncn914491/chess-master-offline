@@ -1,4 +1,4 @@
-# Agent Guide: ChessMaster Offline
+install app into connected android device to # Agent Guide: ChessMaster Offline
 
 ## 🤖 Welcome, Agent (Jules & Others)
 

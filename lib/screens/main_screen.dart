@@ -3,7 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:chess_master/core/theme/app_theme.dart';
 import 'package:chess_master/screens/home/home_screen.dart';
 import 'package:chess_master/screens/puzzles/puzzle_menu_screen.dart';
-import 'package:chess_master/screens/analysis/analysis_screen.dart';
+import 'package:chess_master/screens/analysis/analysis_menu_screen.dart';
 import 'package:chess_master/screens/stats/statistics_screen.dart';
 import 'package:chess_master/screens/settings/settings_screen.dart';
 
@@ -21,7 +21,7 @@ class _MainScreenState extends ConsumerState<MainScreen> {
   final List<Widget> _screens = const [
     HomeScreen(),
     PuzzleMenuScreen(),
-    AnalysisScreen(),
+    AnalysisMenuScreen(),
     StatisticsScreen(),
     SettingsScreen(),
   ];
@@ -30,10 +30,7 @@ class _MainScreenState extends ConsumerState<MainScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppTheme.backgroundDark,
-      body: IndexedStack(
-        index: _currentIndex,
-        children: _screens,
-      ),
+      body: IndexedStack(index: _currentIndex, children: _screens),
       bottomNavigationBar: Container(
         decoration: BoxDecoration(
           color: AppTheme.surfaceDark,

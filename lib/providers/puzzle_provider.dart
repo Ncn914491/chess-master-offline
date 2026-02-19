@@ -1,13 +1,17 @@
 import 'dart:convert';
 import 'dart:math';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:chess/chess.dart' as chess;
 import 'package:chess_master/models/puzzle_model.dart';
 import 'package:chess_master/core/services/database_service.dart';
+import 'package:chess_master/core/services/audio_service.dart';
 
 /// Provider for puzzle state
-final puzzleProvider = StateNotifierProvider<PuzzleNotifier, PuzzleGameState>((ref) {
+final puzzleProvider = StateNotifierProvider<PuzzleNotifier, PuzzleGameState>((
+  ref,
+) {
   return PuzzleNotifier(ref);
 });
 
@@ -15,7 +19,7 @@ final puzzleProvider = StateNotifierProvider<PuzzleNotifier, PuzzleGameState>((r
 final puzzleStatsProvider = FutureProvider<PuzzleStats>((ref) async {
   final db = ref.read(databaseServiceProvider);
   final stats = await db.getStatistics();
-  
+
   if (stats == null) {
     return PuzzleStats(
       currentRating: 1200,
@@ -23,7 +27,7 @@ final puzzleStatsProvider = FutureProvider<PuzzleStats>((ref) async {
       puzzlesAttempted: 0,
     );
   }
-  
+
   return PuzzleStats(
     currentRating: stats['current_puzzle_rating'] as int? ?? 1200,
     puzzlesSolved: stats['puzzles_solved'] as int? ?? 0,
@@ -42,9 +46,9 @@ class PuzzleGameState {
   final String? lastMoveFrom;
   final String? lastMoveTo;
   final bool showingHint;
-  final String? hintFromSquare;  // Full hint: from square
-  final String? hintToSquare;    // Full hint: to square
-  final bool showingSolution;    // Show complete solution
+  final String? hintFromSquare; // Full hint: from square
+  final String? hintToSquare; // Full hint: to square
+  final bool showingSolution; // Show complete solution
   final int hintsUsed;
   final int currentRating;
   final int streak;
@@ -104,12 +108,14 @@ class PuzzleGameState {
       currentPuzzle: currentPuzzle ?? this.currentPuzzle,
       board: board ?? this.board,
       currentMoveIndex: currentMoveIndex ?? this.currentMoveIndex,
-      selectedSquare: clearSelection ? null : (selectedSquare ?? this.selectedSquare),
+      selectedSquare:
+          clearSelection ? null : (selectedSquare ?? this.selectedSquare),
       legalMoves: clearSelection ? [] : (legalMoves ?? this.legalMoves),
       lastMoveFrom: lastMoveFrom ?? this.lastMoveFrom,
       lastMoveTo: lastMoveTo ?? this.lastMoveTo,
       showingHint: clearHint ? false : (showingHint ?? this.showingHint),
-      hintFromSquare: clearHint ? null : (hintFromSquare ?? this.hintFromSquare),
+      hintFromSquare:
+          clearHint ? null : (hintFromSquare ?? this.hintFromSquare),
       hintToSquare: clearHint ? null : (hintToSquare ?? this.hintToSquare),
       showingSolution: showingSolution ?? this.showingSolution,
       hintsUsed: hintsUsed ?? this.hintsUsed,
@@ -133,7 +139,7 @@ class PuzzleGameState {
     if (board == null) return null;
     final piece = board!.get(square);
     if (piece == null) return null;
-    
+
     final colorPrefix = piece.color == chess.Color.WHITE ? 'w' : 'b';
     final pieceChar = piece.type.name.toUpperCase();
     return '$colorPrefix$pieceChar';
@@ -166,11 +172,11 @@ class PuzzleStats {
 
 /// Puzzle mode enum
 enum PuzzleFilterMode {
-  adaptive,   // Based on current rating
-  random,     // Random puzzles
-  eloRange,   // Specific ELO range
-  theme,      // By theme
-  daily,      // Daily puzzle
+  adaptive, // Based on current rating
+  random, // Random puzzles
+  eloRange, // Specific ELO range
+  theme, // By theme
+  daily, // Daily puzzle
 }
 
 /// Puzzle notifier managing puzzle logic
@@ -178,7 +184,9 @@ class PuzzleNotifier extends StateNotifier<PuzzleGameState> {
   final Ref _ref;
   List<Puzzle> _allPuzzles = [];
   final Random _random = Random();
-  
+  final Set<int> _recentlySolvedIds = {}; // Track recently solved puzzles
+  static const int _maxRecentPuzzles = 50; // Keep last 50 puzzles in memory
+
   // Puzzle mode configuration
   PuzzleFilterMode _mode = PuzzleFilterMode.adaptive;
   int _minRating = 400;
@@ -203,16 +211,13 @@ class PuzzleNotifier extends StateNotifier<PuzzleGameState> {
   /// Initialize and load puzzles
   Future<void> initialize() async {
     state = state.copyWith(isLoading: true);
-    
+
     try {
       await _loadPuzzles();
       final stats = await _ref.read(databaseServiceProvider).getStatistics();
       final rating = stats?['current_puzzle_rating'] as int? ?? 1200;
-      
-      state = state.copyWith(
-        currentRating: rating,
-        isLoading: false,
-      );
+
+      state = state.copyWith(currentRating: rating, isLoading: false);
     } catch (e) {
       state = state.copyWith(
         errorMessage: 'Failed to load puzzles: $e',
@@ -224,7 +229,9 @@ class PuzzleNotifier extends StateNotifier<PuzzleGameState> {
   /// Load puzzles from assets
   Future<void> _loadPuzzles() async {
     try {
-      final String jsonString = await rootBundle.loadString('assets/puzzles/puzzles.json');
+      final String jsonString = await rootBundle.loadString(
+        'assets/puzzles/puzzles.json',
+      );
       final List<dynamic> jsonList = json.decode(jsonString);
       _allPuzzles = jsonList.map((j) => Puzzle.fromJson(j)).toList();
     } catch (e) {
@@ -247,10 +254,10 @@ class PuzzleNotifier extends StateNotifier<PuzzleGameState> {
     }
 
     final rating = targetRating ?? state.currentRating;
-    
+
     // Find a puzzle close to current rating
     final puzzle = _selectPuzzleByRating(rating);
-    
+
     if (puzzle == null) {
       state = state.copyWith(
         errorMessage: 'No suitable puzzle found',
@@ -267,26 +274,35 @@ class PuzzleNotifier extends StateNotifier<PuzzleGameState> {
     if (_allPuzzles.isEmpty) return null;
 
     List<Puzzle> candidates;
-    
+
     switch (_mode) {
       case PuzzleFilterMode.random:
         // Any puzzle from the collection
         candidates = List.from(_allPuzzles);
         break;
-        
+
       case PuzzleFilterMode.eloRange:
         // Filter by custom ELO range
-        candidates = _allPuzzles.where((p) =>
-            p.rating >= _minRating && p.rating <= _maxRating).toList();
+        candidates =
+            _allPuzzles
+                .where((p) => p.rating >= _minRating && p.rating <= _maxRating)
+                .toList();
         break;
-        
+
       case PuzzleFilterMode.theme:
         // Filter by theme
         if (_themeFilter == 'all') {
           candidates = List.from(_allPuzzles);
         } else {
-          candidates = _allPuzzles.where((p) =>
-              p.themes.any((t) => t.toLowerCase().contains(_themeFilter.toLowerCase()))).toList();
+          candidates =
+              _allPuzzles
+                  .where(
+                    (p) => p.themes.any(
+                      (t) =>
+                          t.toLowerCase().contains(_themeFilter.toLowerCase()),
+                    ),
+                  )
+                  .toList();
         }
         break;
 
@@ -297,29 +313,41 @@ class PuzzleNotifier extends StateNotifier<PuzzleGameState> {
         final dailyRandom = Random(seed);
         if (_allPuzzles.isEmpty) return null;
         return _allPuzzles[dailyRandom.nextInt(_allPuzzles.length)];
-        
+
       case PuzzleFilterMode.adaptive:
       default:
         // Adaptive: within ±200 of current rating
         final minRating = targetRating - 200;
         final maxRating = targetRating + 200;
-        candidates = _allPuzzles.where((p) =>
-            p.rating >= minRating && p.rating <= maxRating).toList();
+        candidates =
+            _allPuzzles
+                .where((p) => p.rating >= minRating && p.rating <= maxRating)
+                .toList();
         break;
     }
-    
+
     if (candidates.isEmpty) {
       // Fall back to any puzzle
-      return _allPuzzles[_random.nextInt(_allPuzzles.length)];
+      candidates = List.from(_allPuzzles);
     }
-    
-    return candidates[_random.nextInt(candidates.length)];
+
+    // Filter out recently solved puzzles
+    final freshCandidates =
+        candidates.where((p) => !_recentlySolvedIds.contains(p.id)).toList();
+
+    // If all puzzles were recently solved, clear history and use all candidates
+    if (freshCandidates.isEmpty) {
+      _recentlySolvedIds.clear();
+      return candidates[_random.nextInt(candidates.length)];
+    }
+
+    return freshCandidates[_random.nextInt(freshCandidates.length)];
   }
 
   /// Load a specific puzzle
   Future<void> _loadPuzzle(Puzzle puzzle) async {
     final board = chess.Chess.fromFEN(puzzle.fen);
-    
+
     state = state.copyWith(
       currentPuzzle: puzzle,
       board: board,
@@ -351,11 +379,8 @@ class PuzzleNotifier extends StateNotifier<PuzzleGameState> {
     if (setupMove == null) return;
 
     _applyUciMove(setupMove);
-    
-    state = state.copyWith(
-      state: PuzzleState.playing,
-      isPlayerTurn: true,
-    );
+
+    state = state.copyWith(state: PuzzleState.playing, isPlayerTurn: true);
   }
 
   /// Apply a UCI format move
@@ -366,21 +391,25 @@ class PuzzleNotifier extends StateNotifier<PuzzleGameState> {
     final to = uci.substring(2, 4);
     final promotion = uci.length > 4 ? uci.substring(4, 5) : null;
 
-    final move = state.board!.move({
-      'from': from,
-      'to': to,
-      if (promotion != null) 'promotion': promotion,
-    });
+    try {
+      state.board!.move({
+        'from': from,
+        'to': to,
+        if (promotion != null) 'promotion': promotion,
+      });
 
-    // Create new board with same state
-    final newBoard = chess.Chess.fromFEN(state.board!.fen);
-    state = state.copyWith(
-      board: newBoard,
-      lastMoveFrom: from,
-      lastMoveTo: to,
-    );
-    return true;
+      // Update state with new board position
+      state = state.copyWith(
+        board: state.board,
+        lastMoveFrom: from,
+        lastMoveTo: to,
+      );
+
+      return true;
+    } catch (e) {
+      debugPrint('Error applying UCI move $uci: $e');
       return false;
+    }
   }
 
   /// Select a square on the board
@@ -402,11 +431,8 @@ class PuzzleNotifier extends StateNotifier<PuzzleGameState> {
       // Get legal moves for this piece
       final moves = board.moves({'square': square, 'verbose': true});
       final legalSquares = moves.map((m) => m['to'] as String).toList();
-      
-      state = state.copyWith(
-        selectedSquare: square,
-        legalMoves: legalSquares,
-      );
+
+      state = state.copyWith(selectedSquare: square, legalMoves: legalSquares);
     } else {
       state = state.copyWith(clearSelection: true);
     }
@@ -420,19 +446,23 @@ class PuzzleNotifier extends StateNotifier<PuzzleGameState> {
     // Check if this is the expected move
     final uciMove = '$from$to${promotion ?? ''}';
     final expectedMove = puzzle.getExpectedMove(state.currentMoveIndex);
-    
+
     if (expectedMove == null) return;
 
-    final isCorrect = expectedMove.toLowerCase().startsWith(uciMove.toLowerCase());
+    final isCorrect = expectedMove.toLowerCase().startsWith(
+      uciMove.toLowerCase(),
+    );
 
     if (!isCorrect) {
-      // Wrong move
+      // Wrong move - play error sound
+      AudioService.instance.playCheck(); // Using check sound as error indicator
+
       state = state.copyWith(
         state: PuzzleState.incorrect,
         errorMessage: 'Not the best move. Try again!',
         clearSelection: true,
       );
-      
+
       // Reset to try again after delay
       Future.delayed(const Duration(seconds: 1), () {
         if (state.state == PuzzleState.incorrect) {
@@ -446,18 +476,27 @@ class PuzzleNotifier extends StateNotifier<PuzzleGameState> {
       return;
     }
 
+    // Correct move - play move sound
+    final capturedPiece = state.board!.get(to);
+    if (capturedPiece != null) {
+      AudioService.instance.playCapture();
+    } else {
+      AudioService.instance.playMove();
+    }
+
     // Check for promotion
-    final expectedPromotion = expectedMove.length > 4 ? expectedMove.substring(4) : null;
+    final expectedPromotion =
+        expectedMove.length > 4 ? expectedMove.substring(4) : null;
     final finalMove = '$from$to${expectedPromotion ?? promotion ?? ''}';
 
     // Apply the correct move
     if (!_applyUciMove(finalMove)) return;
 
     final newMoveIndex = state.currentMoveIndex + 1;
-    
+
     // Check if puzzle is completed
     final nextExpectedMove = puzzle.getExpectedMove(newMoveIndex);
-    
+
     if (nextExpectedMove == null) {
       // Puzzle completed!
       _onPuzzleCompleted(true);
@@ -468,6 +507,7 @@ class PuzzleNotifier extends StateNotifier<PuzzleGameState> {
       currentMoveIndex: newMoveIndex,
       isPlayerTurn: false,
       clearSelection: true,
+      state: PuzzleState.correct, // Show success feedback
     );
 
     // Apply opponent's response after a delay
@@ -481,7 +521,7 @@ class PuzzleNotifier extends StateNotifier<PuzzleGameState> {
     if (!_applyUciMove(uciMove)) return;
 
     final newMoveIndex = state.currentMoveIndex + 1;
-    
+
     // Check if there are more moves for player
     if (state.currentPuzzle?.getExpectedMove(newMoveIndex) == null) {
       // Puzzle completed!
@@ -489,10 +529,7 @@ class PuzzleNotifier extends StateNotifier<PuzzleGameState> {
       return;
     }
 
-    state = state.copyWith(
-      currentMoveIndex: newMoveIndex,
-      isPlayerTurn: true,
-    );
+    state = state.copyWith(currentMoveIndex: newMoveIndex, isPlayerTurn: true);
   }
 
   /// Handle puzzle completion
@@ -500,20 +537,33 @@ class PuzzleNotifier extends StateNotifier<PuzzleGameState> {
     final puzzle = state.currentPuzzle;
     if (puzzle == null) return;
 
+    // Add to recently solved puzzles to avoid duplicates
+    _recentlySolvedIds.add(puzzle.id);
+    // Keep only the last N puzzles
+    if (_recentlySolvedIds.length > _maxRecentPuzzles) {
+      _recentlySolvedIds.remove(_recentlySolvedIds.first);
+    }
+
+    // Play completion sound
+    AudioService.instance.playGameEnd();
+
     // Calculate rating change
     int ratingChange = 0;
     final currentRating = state.currentRating;
     final puzzleRating = puzzle.rating;
-    
+
     if (solved) {
       // K-factor style rating change
-      final expectedScore = 1 / (1 + pow(10, (puzzleRating - currentRating) / 400));
+      final expectedScore =
+          1 / (1 + pow(10, (puzzleRating - currentRating) / 400));
       ratingChange = (32 * (1 - expectedScore)).round();
       if (state.hintsUsed > 0) {
-        ratingChange = (ratingChange * 0.5).round(); // Reduce gain if hints used
+        ratingChange =
+            (ratingChange * 0.5).round(); // Reduce gain if hints used
       }
     } else {
-      final expectedScore = 1 / (1 + pow(10, (puzzleRating - currentRating) / 400));
+      final expectedScore =
+          1 / (1 + pow(10, (puzzleRating - currentRating) / 400));
       ratingChange = -(32 * expectedScore).round();
     }
 
@@ -529,17 +579,25 @@ class PuzzleNotifier extends StateNotifier<PuzzleGameState> {
 
     // Update database
     final db = _ref.read(databaseServiceProvider);
+    final currentStats = await db.getStatistics() ?? {};
+    final puzzlesAttempted =
+        (currentStats['puzzles_attempted'] as int? ?? 0) + 1;
+    final puzzlesSolved =
+        solved
+            ? (currentStats['puzzles_solved'] as int? ?? 0) + 1
+            : (currentStats['puzzles_solved'] as int? ?? 0);
+
     await db.updateStatistics({
       'current_puzzle_rating': newRating,
-      'puzzles_attempted': (await db.getStatistics())?['puzzles_attempted'] ?? 0 + 1,
-      if (solved) 'puzzles_solved': (await db.getStatistics())?['puzzles_solved'] ?? 0 + 1,
+      'puzzles_attempted': puzzlesAttempted,
+      'puzzles_solved': puzzlesSolved,
     });
   }
 
   /// Show hint for current position - shows full move with arrow
   void showHint() {
     if (state.state != PuzzleState.playing || !state.isPlayerTurn) return;
-    
+
     final puzzle = state.currentPuzzle;
     if (puzzle == null) return;
 
@@ -548,7 +606,7 @@ class PuzzleNotifier extends StateNotifier<PuzzleGameState> {
 
     final fromSquare = expectedMove.substring(0, 2);
     final toSquare = expectedMove.substring(2, 4);
-    
+
     state = state.copyWith(
       showingHint: true,
       hintFromSquare: fromSquare,
@@ -565,13 +623,40 @@ class PuzzleNotifier extends StateNotifier<PuzzleGameState> {
   }
 
   /// Show complete solution for the puzzle
-  void showSolution() {
+  Future<void> showSolution() async {
     if (state.currentPuzzle == null) return;
-    
+
     state = state.copyWith(
       showingSolution: true,
-      hintsUsed: state.hintsUsed + 1, // Count as hint usage
+      hintsUsed: state.hintsUsed + 1,
     );
+
+    // Auto-play the solution
+    await _playSolution();
+  }
+
+  /// Play through the solution moves
+  Future<void> _playSolution() async {
+    final puzzle = state.currentPuzzle;
+    if (puzzle == null || state.board == null) return;
+
+    // Reset to starting position
+    final board = chess.Chess.fromFEN(puzzle.fen);
+    state = state.copyWith(board: board);
+
+    // Apply all moves with delays
+    for (int i = 0; i < puzzle.moves.length; i++) {
+      await Future.delayed(const Duration(milliseconds: 800));
+
+      if (!_applyUciMove(puzzle.moves[i])) {
+        debugPrint('Failed to apply solution move: ${puzzle.moves[i]}');
+        break;
+      }
+    }
+
+    // Mark as completed after showing solution
+    await Future.delayed(const Duration(seconds: 1));
+    await _onPuzzleCompleted(false); // Count as failed since solution was shown
   }
 
   /// Hide solution
@@ -583,13 +668,16 @@ class PuzzleNotifier extends StateNotifier<PuzzleGameState> {
   List<String> getSolutionMoves() {
     final puzzle = state.currentPuzzle;
     if (puzzle == null) return [];
-    
+
     return puzzle.moves;
   }
 
   /// Skip current puzzle
-  void skipPuzzle() {
-    _onPuzzleCompleted(false);
+  Future<void> skipPuzzle() async {
+    await _onPuzzleCompleted(false);
+    // Load next puzzle after a short delay
+    await Future.delayed(const Duration(milliseconds: 500));
+    await startNewPuzzle();
   }
 
   /// Retry current puzzle
@@ -614,13 +702,13 @@ class PuzzleNotifier extends StateNotifier<PuzzleGameState> {
   /// Check if a move needs promotion dialog
   bool needsPromotion(String from, String to) {
     if (state.board == null) return false;
-    
+
     final piece = state.board!.get(from);
     if (piece == null || piece.type != chess.PieceType.PAWN) return false;
-    
+
     final toRank = int.parse(to[1]);
     final isWhite = piece.color == chess.Color.WHITE;
-    
+
     return (isWhite && toRank == 8) || (!isWhite && toRank == 1);
   }
 
@@ -628,10 +716,10 @@ class PuzzleNotifier extends StateNotifier<PuzzleGameState> {
   List<Map<String, String>> getAllLegalMoves() {
     if (state.board == null) return [];
     final moves = state.board!.moves({'verbose': true});
-    return moves.map((m) => {
-      'from': m['from'] as String,
-      'to': m['to'] as String,
-    }).toList().cast<Map<String, String>>();
+    return moves
+        .map((m) => {'from': m['from'] as String, 'to': m['to'] as String})
+        .toList()
+        .cast<Map<String, String>>();
   }
 
   /// Check if square is a legal move target
