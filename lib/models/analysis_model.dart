@@ -1,4 +1,5 @@
 import 'package:chess_master/core/constants/app_constants.dart';
+import 'package:chess_master/core/models/chess_models.dart';
 
 /// Model for move analysis data
 class MoveAnalysis {
@@ -37,43 +38,6 @@ class MoveAnalysis {
 
   /// Check if this was the best move
   bool get wasBestMove => classification == MoveClassification.best;
-}
-
-/// Engine line for analysis
-class EngineLine {
-  final int rank; // 1, 2, 3 for multipv
-  final double evaluation;
-  final int depth;
-  final List<String> moves; // UCI format moves
-  final List<String>? sanMoves; // SAN format moves
-  final bool isMate;
-  final int? mateIn;
-
-  const EngineLine({
-    required this.rank,
-    required this.evaluation,
-    required this.depth,
-    required this.moves,
-    this.sanMoves,
-    this.isMate = false,
-    this.mateIn,
-  });
-
-  /// Get display string for evaluation
-  String get evalDisplay {
-    if (isMate && mateIn != null) {
-      return mateIn! > 0 ? 'M$mateIn' : '-M${mateIn!.abs()}';
-    }
-    final sign = evaluation >= 0 ? '+' : '';
-    return '$sign${evaluation.toStringAsFixed(2)}';
-  }
-
-  /// Get first few moves as a string
-  String getMovePreview({int count = 5}) {
-    final movesToShow = sanMoves ?? moves;
-    if (movesToShow.isEmpty) return '';
-    return movesToShow.take(count).join(' ');
-  }
 }
 
 /// Full game analysis result

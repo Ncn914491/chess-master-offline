@@ -2,6 +2,8 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:stockfish_chess_engine/stockfish_chess_engine.dart';
 import 'package:chess_master/core/constants/app_constants.dart';
+import 'package:chess_master/core/models/chess_models.dart';
+import 'package:chess_master/core/services/lightweight_engine_service.dart';
 
 /// Service class for interacting with the Stockfish chess engine
 /// Uses UCI (Universal Chess Interface) protocol
@@ -9,8 +11,11 @@ class StockfishService {
   static StockfishService? _instance;
   Stockfish? _stockfish;
   bool _isReady = false;
-  final StreamController<String> _outputController =
-      StreamController<String>.broadcast();
+  bool _useFallback = false;
+
+  final StreamController<String> _outputController = StreamController<String>.broadcast();
+  final ValueNotifier<EngineStatus> statusNotifier = ValueNotifier(EngineStatus.initializing);
+
   Completer<void>? _initCompleter;
 
   // RegExps for parsing engine output
@@ -32,14 +37,18 @@ class StockfishService {
   Stream<String> get outputStream => _outputController.stream;
 
   /// Whether the engine is initialized and ready
-  bool get isReady => _isReady;
+  bool get isReady => _isReady || _useFallback;
+
+  /// Whether using fallback engine
+  bool get isUsingFallback => _useFallback;
 
   /// Initialize the Stockfish engine
   Future<void> initialize() async {
-    if (_isReady) return;
+    if (_isReady || _useFallback) return;
     if (_initCompleter != null) return _initCompleter!.future;
 
     _initCompleter = Completer<void>();
+    statusNotifier.value = EngineStatus.initializing;
 
     int retryCount = 0;
     const maxRetries = 2;
@@ -60,6 +69,7 @@ class StockfishService {
             }
             if (line.contains('readyok')) {
               _isReady = true;
+              statusNotifier.value = EngineStatus.ready;
             }
           }
         });
@@ -98,9 +108,12 @@ class StockfishService {
         _isReady = false;
 
         if (retryCount >= maxRetries) {
-          _initCompleter?.completeError(e);
-          _initCompleter = null; // Allow retry later
-          return; // Rethrow or just return, caller will see completer error
+          debugPrint('Stockfish init failed after retries. Switching to fallback.');
+          _useFallback = true;
+          statusNotifier.value = EngineStatus.usingFallback;
+          _initCompleter?.complete(); // Resolve successfully as we have a fallback
+          _initCompleter = null;
+          return;
         }
 
         // Small delay before retry
@@ -135,7 +148,7 @@ class StockfishService {
 
   /// Send a command to the engine
   void _sendCommand(String command) {
-    if (_stockfish != null) {
+    if (_stockfish != null && !_useFallback) {
       _stockfish?.stdin = '$command\n';
     }
   }
@@ -149,8 +162,18 @@ class StockfishService {
     required int depth,
     int? thinkTimeMs,
   }) async {
-    if (!_isReady) {
+    if (!_isReady && !_useFallback) {
       await initialize();
+    }
+
+    // If using fallback (SimpleBot)
+    if (_useFallback) {
+      // Small artificial delay to simulate thinking if needed
+      if (thinkTimeMs != null && thinkTimeMs > 500) {
+        final delay = thinkTimeMs ~/ 2;
+        await Future.delayed(Duration(milliseconds: delay));
+      }
+      return LightweightEngineService.instance.getBestMove(fen, depth);
     }
 
     final completer = Completer<BestMoveResult>();
@@ -208,17 +231,23 @@ class StockfishService {
       _sendCommand('go depth $depth');
     }
 
-    // Timeout after 30 seconds
+    // Timeout after 30 seconds (Stockfish) or shorter if preferred
     return completer.future.timeout(
       const Duration(seconds: 30),
       onTimeout: () {
         subscription.cancel();
         _sendCommand('stop');
+
         // Reset engine state on timeout so it re-initializes next time
+        // But mark as fallback now
         _isReady = false;
         _stockfish?.dispose();
         _stockfish = null;
-        return BestMoveResult(bestMove: '', evaluation: 0);
+        _useFallback = true;
+        statusNotifier.value = EngineStatus.usingFallback;
+
+        // Fallback immediate
+        return LightweightEngineService.instance.getBestMove(fen, depth);
       },
     );
   }
@@ -230,8 +259,14 @@ class StockfishService {
     int depth = AppConstants.analysisDepth,
     int multiPv = AppConstants.topEngineLinesCount,
   }) async {
-    if (!_isReady) {
+    if (!_isReady && !_useFallback) {
       await initialize();
+    }
+
+    // Fallback doesn't support full analysis yet
+    // Throw error to let AnalysisProvider handle it with BasicEvaluator
+    if (_useFallback) {
+       throw Exception('Stockfish analysis unavailable. Using basic evaluator.');
     }
 
     final completer = Completer<AnalysisResult>();
@@ -275,23 +310,20 @@ class StockfishService {
             mateIn = mate;
           }
 
+          final engineLine = EngineLine(
+            rank: pvNumber,
+            evaluation: (eval ?? 0) / 100.0,
+            depth: currentDepth,
+            moves: moves,
+            isMate: mate != null,
+            mateIn: mate,
+          );
+
           // Update or add line
           if (lines.length >= pvNumber) {
-            lines[pvNumber - 1] = EngineLine(
-              moves: moves,
-              evaluation: eval,
-              mateIn: mate,
-              depth: currentDepth,
-            );
+            lines[pvNumber - 1] = engineLine;
           } else {
-            lines.add(
-              EngineLine(
-                moves: moves,
-                evaluation: eval,
-                mateIn: mate,
-                depth: currentDepth,
-              ),
-            );
+            lines.add(engineLine);
           }
         }
       }
@@ -322,28 +354,37 @@ class StockfishService {
         subscription.cancel();
         _sendCommand('stop');
         _sendCommand('setoption name MultiPV value 1');
-        // Reset engine state on timeout so it re-initializes next time
+
+        // Reset engine state on timeout
         _isReady = false;
         _stockfish?.dispose();
         _stockfish = null;
-        return AnalysisResult(evaluation: 0, lines: [], depth: 0);
+        _useFallback = true;
+        statusNotifier.value = EngineStatus.usingFallback;
+
+        throw Exception('Stockfish analysis timed out.');
       },
     );
   }
 
   /// Set the engine skill level (affects playing strength)
   void setSkillLevel(int elo) {
+    if (_useFallback) return;
     _sendCommand('setoption name UCI_Elo value $elo');
   }
 
   /// Stop any ongoing analysis
   void stopAnalysis() {
-    _sendCommand('stop');
+    if (!_useFallback) {
+      _sendCommand('stop');
+    }
   }
 
   /// Start a new game
   void newGame() {
-    _sendCommand('ucinewgame');
+    if (!_useFallback) {
+      _sendCommand('ucinewgame');
+    }
   }
 
   /// Dispose the engine
@@ -351,88 +392,8 @@ class StockfishService {
     _stockfish?.dispose();
     _stockfish = null;
     _isReady = false;
+    _useFallback = false;
+    statusNotifier.value = EngineStatus.disposed;
     _outputController.close();
-  }
-}
-
-/// Result of a best move search
-class BestMoveResult {
-  final String bestMove;
-  final String? ponderMove;
-  final int? evaluation;
-  final int? mateIn;
-
-  BestMoveResult({
-    required this.bestMove,
-    this.ponderMove,
-    this.evaluation,
-    this.mateIn,
-  });
-
-  /// Parse UCI move format (e.g., "e2e4") to from/to squares
-  (String from, String to, String? promotion) get parsedMove {
-    if (bestMove.length < 4) return ('', '', null);
-
-    final from = bestMove.substring(0, 2);
-    final to = bestMove.substring(2, 4);
-    final promotion = bestMove.length > 4 ? bestMove.substring(4, 5) : null;
-
-    return (from, to, promotion);
-  }
-
-  bool get isValid => bestMove.isNotEmpty && bestMove.length >= 4;
-}
-
-/// Result of position analysis
-class AnalysisResult {
-  final int evaluation;
-  final int? mateIn;
-  final List<EngineLine> lines;
-  final int depth;
-
-  AnalysisResult({
-    required this.evaluation,
-    this.mateIn,
-    required this.lines,
-    required this.depth,
-  });
-
-  /// Get evaluation in pawns (centipawns / 100)
-  double get evalInPawns => evaluation / 100.0;
-
-  /// Get formatted evaluation string
-  String get formattedEval {
-    if (mateIn != null) {
-      return mateIn! > 0 ? 'M$mateIn' : '-M${mateIn!.abs()}';
-    }
-    final sign = evaluation >= 0 ? '+' : '';
-    return '$sign${evalInPawns.toStringAsFixed(1)}';
-  }
-}
-
-/// A single engine analysis line
-class EngineLine {
-  final List<String> moves;
-  final int? evaluation;
-  final int? mateIn;
-  final int depth;
-
-  EngineLine({
-    required this.moves,
-    this.evaluation,
-    this.mateIn,
-    required this.depth,
-  });
-
-  /// Get evaluation in pawns
-  double get evalInPawns => (evaluation ?? 0) / 100.0;
-
-  /// Get formatted evaluation string
-  String get formattedEval {
-    if (mateIn != null) {
-      return mateIn! > 0 ? 'M$mateIn' : '-M${mateIn!.abs()}';
-    }
-    final sign = (evaluation ?? 0) >= 0 ? '+' : '';
-    return '$sign${evalInPawns.toStringAsFixed(1)}';
   }
 }

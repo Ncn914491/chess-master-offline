@@ -3,7 +3,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:chess/chess.dart' as chess;
 import 'package:chess_master/models/game_model.dart';
 import 'package:chess_master/models/analysis_model.dart';
+import 'package:chess_master/core/models/chess_models.dart';
 import 'package:chess_master/core/services/stockfish_service.dart' as stockfish;
+import 'package:chess_master/core/services/basic_evaluator_service.dart';
 import 'package:chess_master/core/constants/app_constants.dart';
 
 /// Provider for analysis state
@@ -271,22 +273,23 @@ class AnalysisNotifier extends StateNotifier<AnalysisState> {
         multiPv: AppConstants.topEngineLinesCount,
       );
 
-      final engineLines = result.lines.asMap().entries.map((entry) => EngineLine(
-        rank: entry.key + 1,
-        evaluation: (entry.value.evaluation ?? 0) / 100.0,  // Convert centipawns to pawns
-        depth: entry.value.depth,
-        moves: entry.value.moves,
-        isMate: entry.value.mateIn != null,
-        mateIn: entry.value.mateIn,
-      )).toList();
-
       state = state.copyWith(
-        currentEval: result.evaluation / 100.0,  // Convert centipawns to pawns
-        currentEngineLines: engineLines,
+        currentEval: result.evalInPawns,
+        currentEngineLines: result.lines,
         bestMove: result.lines.isNotEmpty ? result.lines.first.moves.first : null,
       );
     } catch (e) {
-      // Silently fail for live analysis
+      debugPrint('Stockfish analysis failed: $e. Using BasicEvaluator.');
+      try {
+        final basicResult = await BasicEvaluatorService.instance.analyze(state.fen);
+        state = state.copyWith(
+          currentEval: basicResult.evalInPawns,
+          currentEngineLines: basicResult.lines,
+          bestMove: basicResult.lines.isNotEmpty ? basicResult.lines.first.moves.first : null,
+        );
+      } catch (e2) {
+        // Silently fail
+      }
     }
   }
 
@@ -317,9 +320,15 @@ class AnalysisNotifier extends StateNotifier<AnalysisState> {
         depth: 15,
         multiPv: 1,
       );
-      prevEval = initialResult.evaluation / 100.0;  // Convert centipawns to pawns
+      prevEval = initialResult.evalInPawns;
     } catch (e) {
-      // Continue with 0.0
+      // Use fallback
+      try {
+        final basicResult = await BasicEvaluatorService.instance.analyze(board.fen);
+        prevEval = basicResult.evalInPawns;
+      } catch (e2) {
+        prevEval = 0.0;
+      }
     }
 
     for (int i = 0; i < moves.length; i++) {
@@ -335,7 +344,12 @@ class AnalysisNotifier extends StateNotifier<AnalysisState> {
         );
         bestMove = bestMoveResult.bestMove;
       } catch (e) {
-        // Continue without best move
+        try {
+          final basicResult = await BasicEvaluatorService.instance.analyze(board.fen);
+          bestMove = basicResult.lines.isNotEmpty ? basicResult.lines.first.moves.first : null;
+        } catch (e2) {
+          bestMove = null;
+        }
       }
 
       // Apply the actual move
@@ -352,17 +366,16 @@ class AnalysisNotifier extends StateNotifier<AnalysisState> {
           multiPv: 3,
         );
         
-        afterEval = result.evaluation / 100.0;  // Convert centipawns to pawns
-        engineLines = result.lines.asMap().entries.map((entry) => EngineLine(
-          rank: entry.key + 1,
-          evaluation: (entry.value.evaluation ?? 0) / 100.0,
-          depth: entry.value.depth,
-          moves: entry.value.moves,
-          isMate: entry.value.mateIn != null,
-          mateIn: entry.value.mateIn,
-        )).toList();
+        afterEval = result.evalInPawns;
+        engineLines = result.lines;
       } catch (e) {
-        // Continue with 0.0
+        try {
+          final basicResult = await BasicEvaluatorService.instance.analyze(board.fen);
+          afterEval = basicResult.evalInPawns;
+          engineLines = basicResult.lines;
+        } catch (e2) {
+          afterEval = prevEval; // Assume no change if failed
+        }
       }
 
       // Classify the move
