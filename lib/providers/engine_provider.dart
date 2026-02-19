@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:chess_master/core/models/chess_models.dart';
 import 'package:chess_master/core/services/stockfish_service.dart';
 import 'package:chess_master/core/services/lightweight_engine_service.dart';
 import 'package:chess_master/core/constants/app_constants.dart';
@@ -81,6 +82,7 @@ class EngineState {
 class EngineNotifier extends StateNotifier<EngineState> {
   final StockfishService _service;
   Timer? _thinkingTimer;
+  int _searchId = 0;
 
   EngineNotifier(this._service) : super(const EngineState());
 
@@ -98,8 +100,13 @@ class EngineNotifier extends StateNotifier<EngineState> {
   Future<BestMoveResult?> getBotMove({
     required String fen,
     required DifficultyLevel difficulty,
+    BotType botType = BotType.stockfish, // Added param to match usage
   }) async {
-    state = state.copyWith(isThinking: true);
+    // Increment search ID to invalidate previous requests
+    _searchId++;
+    final currentSearchId = _searchId;
+
+    state = state.copyWith(isThinking: true, currentFen: fen);
 
     try {
       // Initialize if not ready
@@ -111,10 +118,15 @@ class EngineNotifier extends StateNotifier<EngineState> {
         }
       }
 
+      // Check for race condition before heavy operation
+      if (currentSearchId != _searchId) return null;
+
       // If Stockfish failed to init or is not ready, use fallback
       if (!_service.isReady) {
         final fallbackResult = await LightweightEngineService.instance
             .getBestMove(fen, difficulty.depth);
+
+        if (currentSearchId != _searchId) return null;
 
         state = state.copyWith(
           isThinking: false,
@@ -144,11 +156,15 @@ class EngineNotifier extends StateNotifier<EngineState> {
             },
           );
 
+      if (currentSearchId != _searchId) return null;
+
       // Ensure minimum thinking time for realism
       final elapsed = DateTime.now().difference(startTime);
       if (elapsed < minDelay) {
         await Future.delayed(minDelay - elapsed);
       }
+
+      if (currentSearchId != _searchId) return null;
 
       state = state.copyWith(
         isThinking: false,
@@ -159,11 +175,15 @@ class EngineNotifier extends StateNotifier<EngineState> {
 
       return result;
     } catch (e) {
+      if (currentSearchId != _searchId) return null;
+
       debugPrint('Error with Stockfish: $e. Switching to lightweight engine.');
 
       try {
         final fallbackResult = await LightweightEngineService.instance
             .getBestMove(fen, difficulty.depth);
+
+        if (currentSearchId != _searchId) return null;
 
         state = state.copyWith(
           isThinking: false,
@@ -181,6 +201,9 @@ class EngineNotifier extends StateNotifier<EngineState> {
 
   /// Get a hint for the player
   Future<BestMoveResult?> getHint({required String fen, int depth = 15}) async {
+    _searchId++;
+    final currentSearchId = _searchId;
+
     state = state.copyWith(isThinking: true);
 
     try {
@@ -192,20 +215,30 @@ class EngineNotifier extends StateNotifier<EngineState> {
         }
       }
 
+      if (currentSearchId != _searchId) return null;
+
       if (_service.isReady) {
         final result = await _service.getBestMove(fen: fen, depth: depth);
+
+        if (currentSearchId != _searchId) return null;
+
         state = state.copyWith(isThinking: false, bestMove: result.bestMove);
         return result;
       } else {
         throw Exception('Stockfish not ready');
       }
     } catch (e) {
+      if (currentSearchId != _searchId) return null;
+
       debugPrint('Error getting hint from Stockfish: $e. Using fallback.');
       try {
         final result = await LightweightEngineService.instance.getBestMove(
           fen,
           depth,
         );
+
+        if (currentSearchId != _searchId) return null;
+
         state = state.copyWith(isThinking: false, bestMove: result.bestMove);
         return result;
       } catch (fallbackError) {
@@ -223,6 +256,9 @@ class EngineNotifier extends StateNotifier<EngineState> {
   }) async {
     // Stop any existing analysis
     stopAnalysis();
+
+    _searchId++;
+    final currentSearchId = _searchId;
 
     state = state.copyWith(
       isAnalyzing: true,
@@ -242,11 +278,15 @@ class EngineNotifier extends StateNotifier<EngineState> {
         }
       }
 
+      if (currentSearchId != _searchId) return;
+
       final result = await _service.analyzePosition(
         fen: fen,
         depth: depth,
         multiPv: multiPv,
       );
+
+      if (currentSearchId != _searchId) return;
 
       state = state.copyWith(
         isAnalyzing: false,
@@ -256,6 +296,8 @@ class EngineNotifier extends StateNotifier<EngineState> {
         depth: result.depth,
       );
     } catch (e) {
+      if (currentSearchId != _searchId) return;
+
       state = state.copyWith(isAnalyzing: false);
       debugPrint('Error analyzing position: $e');
     }
@@ -263,6 +305,7 @@ class EngineNotifier extends StateNotifier<EngineState> {
 
   /// Stop ongoing analysis
   void stopAnalysis() {
+    _searchId++; // Invalidate pending searches
     _service.stopAnalysis();
     _thinkingTimer?.cancel();
     state = state.copyWith(isAnalyzing: false, isThinking: false);
@@ -278,6 +321,7 @@ class EngineNotifier extends StateNotifier<EngineState> {
   @override
   void dispose() {
     _thinkingTimer?.cancel();
+    _searchId++;
     super.dispose();
   }
 }

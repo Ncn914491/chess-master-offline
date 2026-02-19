@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
 import 'package:flutter/foundation.dart';
@@ -56,6 +57,7 @@ class PuzzleGameState {
   final bool isPlayerTurn;
   final List<Puzzle> puzzleQueue;
   final bool isLoading;
+  final Set<String> highlightedSquares;
 
   const PuzzleGameState({
     this.state = PuzzleState.loading,
@@ -77,6 +79,7 @@ class PuzzleGameState {
     this.isPlayerTurn = false,
     this.puzzleQueue = const [],
     this.isLoading = false,
+    this.highlightedSquares = const {},
   });
 
   PuzzleGameState copyWith({
@@ -99,6 +102,7 @@ class PuzzleGameState {
     bool? isPlayerTurn,
     List<Puzzle>? puzzleQueue,
     bool? isLoading,
+    Set<String>? highlightedSquares,
     bool clearSelection = false,
     bool clearError = false,
     bool clearHint = false,
@@ -125,6 +129,7 @@ class PuzzleGameState {
       isPlayerTurn: isPlayerTurn ?? this.isPlayerTurn,
       puzzleQueue: puzzleQueue ?? this.puzzleQueue,
       isLoading: isLoading ?? this.isLoading,
+      highlightedSquares: highlightedSquares ?? this.highlightedSquares,
     );
   }
 
@@ -186,6 +191,7 @@ class PuzzleNotifier extends StateNotifier<PuzzleGameState> {
   final Random _random = Random();
   final Set<int> _recentlySolvedIds = {}; // Track recently solved puzzles
   static const int _maxRecentPuzzles = 50; // Keep last 50 puzzles in memory
+  Timer? _solutionTimer;
 
   // Puzzle mode configuration
   PuzzleFilterMode _mode = PuzzleFilterMode.adaptive;
@@ -242,6 +248,8 @@ class PuzzleNotifier extends StateNotifier<PuzzleGameState> {
 
   /// Start a new puzzle session
   Future<void> startNewPuzzle({int? targetRating}) async {
+    _stopSolutionPlayback();
+
     if (_allPuzzles.isEmpty) {
       await _loadPuzzles();
       if (_allPuzzles.isEmpty) {
@@ -255,18 +263,34 @@ class PuzzleNotifier extends StateNotifier<PuzzleGameState> {
 
     final rating = targetRating ?? state.currentRating;
 
-    // Find a puzzle close to current rating
-    final puzzle = _selectPuzzleByRating(rating);
+    int attempts = 0;
+    const maxAttempts = 10;
 
-    if (puzzle == null) {
-      state = state.copyWith(
-        errorMessage: 'No suitable puzzle found',
-        state: PuzzleState.loading,
-      );
-      return;
+    while (attempts < maxAttempts) {
+      attempts++;
+
+      // Find a puzzle close to current rating
+      final puzzle = _selectPuzzleByRating(rating);
+
+      if (puzzle == null) {
+        state = state.copyWith(
+          errorMessage: 'No suitable puzzle found',
+          state: PuzzleState.loading,
+        );
+        return;
+      }
+
+      final success = await _loadPuzzle(puzzle);
+      if (success) return;
+
+      debugPrint('Skipping invalid puzzle: ${puzzle.id}');
+      // If validation failed, try another one
     }
 
-    await _loadPuzzle(puzzle);
+    state = state.copyWith(
+      errorMessage: 'Failed to find valid puzzle',
+      state: PuzzleState.loading,
+    );
   }
 
   /// Select puzzle based on current mode and filters
@@ -345,42 +369,65 @@ class PuzzleNotifier extends StateNotifier<PuzzleGameState> {
   }
 
   /// Load a specific puzzle
-  Future<void> _loadPuzzle(Puzzle puzzle) async {
-    final board = chess.Chess.fromFEN(puzzle.fen);
+  Future<bool> _loadPuzzle(Puzzle puzzle) async {
+    try {
+      // Validation
+      final valid = chess.Chess.validate_fen(puzzle.fen);
+      if (valid['valid'] != true) {
+        debugPrint('Invalid puzzle FEN: ${puzzle.fen}, Error: ${valid['error']}');
+        return false;
+      }
 
-    state = state.copyWith(
-      currentPuzzle: puzzle,
-      board: board,
-      currentMoveIndex: 0,
-      selectedSquare: null,
-      legalMoves: [],
-      lastMoveFrom: null,
-      lastMoveTo: null,
-      showingHint: false,
-      hintsUsed: 0,
-      errorMessage: null,
-      isPlayerTurn: false,
-      state: PuzzleState.ready,
-      clearSelection: true,
-      clearError: true,
-    );
+      final board = chess.Chess.fromFEN(puzzle.fen);
 
-    // Apply setup move after a delay
-    await Future.delayed(const Duration(milliseconds: 500));
-    _applySetupMove();
+      state = state.copyWith(
+        currentPuzzle: puzzle,
+        board: board,
+        currentMoveIndex: 0,
+        selectedSquare: null,
+        legalMoves: [],
+        lastMoveFrom: null,
+        lastMoveTo: null,
+        showingHint: false,
+        hintsUsed: 0,
+        errorMessage: null,
+        isPlayerTurn: false,
+        state: PuzzleState.ready,
+        clearSelection: true,
+        clearError: true,
+        highlightedSquares: {},
+      );
+
+      // Apply setup move after a delay
+      await Future.delayed(const Duration(milliseconds: 500));
+      return _applySetupMove();
+    } catch (e) {
+      debugPrint('Error loading puzzle: $e');
+      return false;
+    }
   }
 
   /// Apply the opponent's setup move
-  void _applySetupMove() {
+  bool _applySetupMove() {
     final puzzle = state.currentPuzzle;
-    if (puzzle == null || state.board == null) return;
+    if (puzzle == null || state.board == null) return false;
 
     final setupMove = puzzle.setupMove;
-    if (setupMove == null) return;
+    if (setupMove == null) {
+      // Some puzzles might start directly?
+      state = state.copyWith(state: PuzzleState.playing, isPlayerTurn: true);
+      return true;
+    }
 
-    _applyUciMove(setupMove);
+    final success = _applyUciMove(setupMove);
 
-    state = state.copyWith(state: PuzzleState.playing, isPlayerTurn: true);
+    if (success) {
+      state = state.copyWith(state: PuzzleState.playing, isPlayerTurn: true);
+      return true;
+    } else {
+      debugPrint('Failed to apply setup move: $setupMove');
+      return false;
+    }
   }
 
   /// Apply a UCI format move
@@ -629,39 +676,69 @@ class PuzzleNotifier extends StateNotifier<PuzzleGameState> {
     state = state.copyWith(
       showingSolution: true,
       hintsUsed: state.hintsUsed + 1,
+      highlightedSquares: {},
     );
 
     // Auto-play the solution
-    await _playSolution();
+    _startSolutionPlayback();
   }
 
-  /// Play through the solution moves
-  Future<void> _playSolution() async {
+  /// Play through the solution moves using Timer
+  void _startSolutionPlayback() {
+    _stopSolutionPlayback();
+
     final puzzle = state.currentPuzzle;
-    if (puzzle == null || state.board == null) return;
+    if (puzzle == null) return;
 
-    // Reset to starting position
+    // Reset board to starting position of the puzzle
     final board = chess.Chess.fromFEN(puzzle.fen);
-    state = state.copyWith(board: board);
+    state = state.copyWith(board: board, currentMoveIndex: 0);
 
-    // Apply all moves with delays
-    for (int i = 0; i < puzzle.moves.length; i++) {
-      await Future.delayed(const Duration(milliseconds: 800));
-
-      if (!_applyUciMove(puzzle.moves[i])) {
-        debugPrint('Failed to apply solution move: ${puzzle.moves[i]}');
-        break;
-      }
+    // Apply setup move first if exists
+    if (puzzle.setupMove != null) {
+      _applyUciMove(puzzle.setupMove!);
     }
 
-    // Mark as completed after showing solution
-    await Future.delayed(const Duration(seconds: 1));
-    await _onPuzzleCompleted(false); // Count as failed since solution was shown
+    int moveIndex = 0;
+
+    _solutionTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (!state.showingSolution) {
+        timer.cancel();
+        return;
+      }
+
+      if (moveIndex >= puzzle.moves.length) {
+        timer.cancel();
+        _onPuzzleCompleted(false);
+        return;
+      }
+
+      final uciMove = puzzle.moves[moveIndex];
+      _applyUciMove(uciMove);
+
+      // Highlight squares
+      if (uciMove.length >= 4) {
+        final from = uciMove.substring(0, 2);
+        final to = uciMove.substring(2, 4);
+        state = state.copyWith(highlightedSquares: {from, to});
+      }
+
+      moveIndex++;
+    });
+  }
+
+  void _stopSolutionPlayback() {
+    _solutionTimer?.cancel();
+    _solutionTimer = null;
   }
 
   /// Hide solution
   void hideSolution() {
-    state = state.copyWith(showingSolution: false);
+    _stopSolutionPlayback();
+    state = state.copyWith(
+      showingSolution: false,
+      highlightedSquares: {},
+    );
   }
 
   /// Get all solution moves for current puzzle
@@ -674,6 +751,7 @@ class PuzzleNotifier extends StateNotifier<PuzzleGameState> {
 
   /// Skip current puzzle
   Future<void> skipPuzzle() async {
+    _stopSolutionPlayback();
     await _onPuzzleCompleted(false);
     // Load next puzzle after a short delay
     await Future.delayed(const Duration(milliseconds: 500));
@@ -682,6 +760,7 @@ class PuzzleNotifier extends StateNotifier<PuzzleGameState> {
 
   /// Retry current puzzle
   Future<void> retryPuzzle() async {
+    _stopSolutionPlayback();
     final puzzle = state.currentPuzzle;
     if (puzzle != null) {
       await _loadPuzzle(puzzle);
@@ -732,5 +811,11 @@ class PuzzleNotifier extends StateNotifier<PuzzleGameState> {
     if (state.board == null || !state.legalMoves.contains(square)) return false;
     final piece = state.board!.get(square);
     return piece != null && piece.color != state.board!.turn;
+  }
+
+  @override
+  void dispose() {
+    _stopSolutionPlayback();
+    super.dispose();
   }
 }

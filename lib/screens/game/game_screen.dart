@@ -16,6 +16,7 @@ import 'package:chess_master/core/services/database_service.dart';
 import 'package:chess_master/core/services/audio_service.dart';
 import 'package:chess_master/screens/analysis/analysis_screen.dart';
 import 'package:chess_master/screens/settings/settings_screen.dart';
+import 'package:chess_master/screens/widgets/engine_status_indicator.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 /// Main game screen for playing chess
@@ -367,6 +368,7 @@ class _GameScreenState extends ConsumerState<GameScreen> {
               ref.read(settingsProvider.notifier).toggleBoardFlip();
             },
           ),
+          const EngineStatusIndicator(),
           PopupMenuButton<String>(
             icon: const Icon(Icons.more_vert, color: AppTheme.textSecondary),
             color: AppTheme.surfaceDark,

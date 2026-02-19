@@ -15,11 +15,112 @@ final gameHistoryProvider = FutureProvider<List<Map<String, dynamic>>>((ref) asy
 });
 
 /// Game history screen showing saved games
-class GameHistoryScreen extends ConsumerWidget {
+class GameHistoryScreen extends ConsumerStatefulWidget {
   const GameHistoryScreen({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<GameHistoryScreen> createState() => _GameHistoryScreenState();
+}
+
+class _GameHistoryScreenState extends ConsumerState<GameHistoryScreen> {
+  String _filterGameMode = 'all'; // 'all', 'bot', 'local'
+  String _filterResult = 'all'; // 'all', 'win', 'loss', 'draw'
+
+  void _showFilterSheet() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: AppTheme.surfaceDark,
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setSheetState) {
+            return Container(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Filter Games',
+                    style: Theme.of(context).textTheme.titleLarge,
+                  ),
+                  const SizedBox(height: 16),
+
+                  // Game Mode Filter
+                  Text('Game Mode', style: Theme.of(context).textTheme.titleMedium),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 8,
+                    children: [
+                      _FilterChip(
+                        label: 'All',
+                        selected: _filterGameMode == 'all',
+                        onSelected: (_) => setSheetState(() => _filterGameMode = 'all'),
+                      ),
+                      _FilterChip(
+                        label: 'Bot',
+                        selected: _filterGameMode == 'bot',
+                        onSelected: (_) => setSheetState(() => _filterGameMode = 'bot'),
+                      ),
+                      _FilterChip(
+                        label: 'Local Multiplayer',
+                        selected: _filterGameMode == 'local',
+                        onSelected: (_) => setSheetState(() => _filterGameMode = 'local'),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+
+                  // Result Filter
+                  Text('Result', style: Theme.of(context).textTheme.titleMedium),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 8,
+                    children: [
+                      _FilterChip(
+                        label: 'All',
+                        selected: _filterResult == 'all',
+                        onSelected: (_) => setSheetState(() => _filterResult = 'all'),
+                      ),
+                      _FilterChip(
+                        label: 'Win',
+                        selected: _filterResult == 'win',
+                        onSelected: (_) => setSheetState(() => _filterResult = 'win'),
+                      ),
+                      _FilterChip(
+                        label: 'Loss',
+                        selected: _filterResult == 'loss',
+                        onSelected: (_) => setSheetState(() => _filterResult = 'loss'),
+                      ),
+                      _FilterChip(
+                        label: 'Draw',
+                        selected: _filterResult == 'draw',
+                        onSelected: (_) => setSheetState(() => _filterResult = 'draw'),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 24),
+
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton(
+                      onPressed: () {
+                        Navigator.pop(context);
+                        setState(() {}); // Update main screen
+                      },
+                      child: const Text('Apply Filters'),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final gamesAsync = ref.watch(gameHistoryProvider);
 
     return Scaffold(
@@ -28,6 +129,11 @@ class GameHistoryScreen extends ConsumerWidget {
         title: const Text('Game History'),
         centerTitle: true,
         actions: [
+          IconButton(
+            icon: const Icon(Icons.filter_list),
+            onPressed: _showFilterSheet,
+            tooltip: 'Filter',
+          ),
           IconButton(
             icon: const Icon(Icons.refresh),
             onPressed: () => ref.refresh(gameHistoryProvider),
@@ -53,13 +159,49 @@ class GameHistoryScreen extends ConsumerWidget {
           ),
         ),
         data: (games) {
-          if (games.isEmpty) {
+          final filteredGames = _filterGames(games);
+
+          if (filteredGames.isEmpty) {
             return _buildEmptyState(context);
           }
-          return _buildGameList(context, ref, games);
+          return _buildGameList(context, filteredGames);
         },
       ),
     );
+  }
+
+  List<Map<String, dynamic>> _filterGames(List<Map<String, dynamic>> games) {
+    return games.where((game) {
+      // Filter by mode
+      if (_filterGameMode != 'all') {
+        final mode = game['game_mode'] as String?;
+        // Default to 'bot' if null (legacy data)
+        final effectiveMode = mode ?? 'bot';
+        if (effectiveMode != _filterGameMode) return false;
+      }
+
+      // Filter by result
+      if (_filterResult != 'all') {
+        final result = game['result'] as String?;
+        final playerColor = game['player_color'] as String? ?? 'white';
+
+        if (result == null) return false;
+
+        if (_filterResult == 'draw') {
+          if (result != '1/2-1/2') return false;
+        } else if (_filterResult == 'win') {
+          final won = (playerColor == 'white' && result == '1-0') ||
+                      (playerColor == 'black' && result == '0-1');
+          if (!won) return false;
+        } else if (_filterResult == 'loss') {
+          final lost = (playerColor == 'white' && result == '0-1') ||
+                       (playerColor == 'black' && result == '1-0');
+          if (!lost) return false;
+        }
+      }
+
+      return true;
+    }).toList();
   }
 
   Widget _buildEmptyState(BuildContext context) {
@@ -70,18 +212,18 @@ class GameHistoryScreen extends ConsumerWidget {
           Icon(
             Icons.history,
             size: 64,
-            color: AppTheme.textSecondary.withValues(alpha: 0.5),
+            color: AppTheme.textSecondary.withOpacity(0.5),
           ),
           const SizedBox(height: 16),
           Text(
-            'No games yet',
+            'No games found',
             style: Theme.of(context).textTheme.titleLarge?.copyWith(
                   color: AppTheme.textSecondary,
                 ),
           ),
           const SizedBox(height: 8),
           Text(
-            'Play some games to see your history',
+            'Try changing your filters',
             style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                   color: AppTheme.textHint,
                 ),
@@ -93,7 +235,6 @@ class GameHistoryScreen extends ConsumerWidget {
 
   Widget _buildGameList(
     BuildContext context,
-    WidgetRef ref,
     List<Map<String, dynamic>> games,
   ) {
     // Group games by date
@@ -269,6 +410,34 @@ class GameHistoryScreen extends ConsumerWidget {
   }
 }
 
+/// Filter Chip widget
+class _FilterChip extends StatelessWidget {
+  final String label;
+  final bool selected;
+  final ValueChanged<bool> onSelected;
+
+  const _FilterChip({
+    required this.label,
+    required this.selected,
+    required this.onSelected,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return FilterChip(
+      label: Text(label),
+      selected: selected,
+      onSelected: onSelected,
+      backgroundColor: AppTheme.cardDark,
+      selectedColor: AppTheme.primaryColor.withOpacity(0.2),
+      checkmarkColor: AppTheme.primaryColor,
+      labelStyle: TextStyle(
+        color: selected ? AppTheme.primaryColor : AppTheme.textPrimary,
+      ),
+    );
+  }
+}
+
 /// Game card widget
 class _GameCard extends StatelessWidget {
   final Map<String, dynamic> game;
@@ -348,7 +517,7 @@ class _GameCard extends StatelessWidget {
                 width: 48,
                 height: 48,
                 decoration: BoxDecoration(
-                  color: resultColor.withValues(alpha: 0.2),
+                  color: resultColor.withOpacity(0.2),
                   borderRadius: BorderRadius.circular(12),
                 ),
                 child: Icon(resultIcon, color: resultColor),
@@ -385,7 +554,7 @@ class _GameCard extends StatelessWidget {
                             vertical: 2,
                           ),
                           decoration: BoxDecoration(
-                            color: resultColor.withValues(alpha: 0.2),
+                            color: resultColor.withOpacity(0.2),
                             borderRadius: BorderRadius.circular(4),
                           ),
                           child: Text(

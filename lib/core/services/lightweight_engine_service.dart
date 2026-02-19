@@ -1,6 +1,6 @@
 import 'dart:math';
 import 'package:chess/chess.dart' as chess;
-import 'package:chess_master/core/services/stockfish_service.dart';
+import 'package:chess_master/core/models/chess_models.dart';
 
 /// A lightweight chess engine written in Dart
 class LightweightEngineService {
