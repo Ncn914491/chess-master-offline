@@ -43,56 +43,63 @@ class EvalBar extends StatelessWidget {
           borderRadius: BorderRadius.circular(4),
           border: Border.all(color: Colors.grey[700]!, width: 1),
         ),
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(3),
-          child: Column(
-            children: [
-              // Black portion (top)
-              Expanded(
-                flex: ((1 - whitePercentage) * 100).round(),
-                child: Container(
-                  color: Colors.black,
-                  alignment: Alignment.center,
-                  child:
-                      whitePercentage < 0.5
-                          ? RotatedBox(
-                            quarterTurns: 3,
-                            child: Text(
-                              evalText,
-                              style: const TextStyle(
-                                color: Colors.white,
-                                fontSize: 10,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                          )
-                          : null,
-                ),
+        child: TweenAnimationBuilder<double>(
+          tween: Tween<double>(begin: 0.5, end: whitePercentage),
+          duration: const Duration(milliseconds: 300),
+          curve: Curves.easeInOut,
+          builder: (context, animValue, child) {
+            return ClipRRect(
+              borderRadius: BorderRadius.circular(3),
+              child: Column(
+                children: [
+                  // Black portion (top)
+                  Expanded(
+                    flex: ((1 - animValue) * 1000).round(),
+                    child: Container(
+                      color: Colors.black,
+                      alignment: Alignment.center,
+                      child:
+                          animValue < 0.5
+                              ? RotatedBox(
+                                quarterTurns: 3,
+                                child: Text(
+                                  evalText,
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              )
+                              : null,
+                    ),
+                  ),
+                  // White portion (bottom)
+                  Expanded(
+                    flex: (animValue * 1000).round(),
+                    child: Container(
+                      color: Colors.white,
+                      alignment: Alignment.center,
+                      child:
+                          animValue >= 0.5
+                              ? RotatedBox(
+                                quarterTurns: 3,
+                                child: Text(
+                                  evalText,
+                                  style: const TextStyle(
+                                    color: Colors.black,
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              )
+                              : null,
+                    ),
+                  ),
+                ],
               ),
-              // White portion (bottom)
-              Expanded(
-                flex: (whitePercentage * 100).round(),
-                child: Container(
-                  color: Colors.white,
-                  alignment: Alignment.center,
-                  child:
-                      whitePercentage >= 0.5
-                          ? RotatedBox(
-                            quarterTurns: 3,
-                            child: Text(
-                              evalText,
-                              style: const TextStyle(
-                                color: Colors.black,
-                                fontSize: 10,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                          )
-                          : null,
-                ),
-              ),
-            ],
-          ),
+            );
+          },
         ),
       );
     } else {
@@ -103,50 +110,57 @@ class EvalBar extends StatelessWidget {
           borderRadius: BorderRadius.circular(4),
           border: Border.all(color: Colors.grey[700]!, width: 1),
         ),
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(3),
-          child: Row(
-            children: [
-              // White portion (left)
-              Expanded(
-                flex: (whitePercentage * 100).round(),
-                child: Container(
-                  color: Colors.white,
-                  alignment: Alignment.center,
-                  child:
-                      whitePercentage >= 0.5
-                          ? Text(
-                            evalText,
-                            style: const TextStyle(
-                              color: Colors.black,
-                              fontSize: 10,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          )
-                          : null,
-                ),
+        child: TweenAnimationBuilder<double>(
+          tween: Tween<double>(begin: 0.5, end: whitePercentage),
+          duration: const Duration(milliseconds: 300),
+          curve: Curves.easeInOut,
+          builder: (context, animValue, child) {
+            return ClipRRect(
+              borderRadius: BorderRadius.circular(3),
+              child: Row(
+                children: [
+                  // White portion (left)
+                  Expanded(
+                    flex: (animValue * 1000).round(),
+                    child: Container(
+                      color: Colors.white,
+                      alignment: Alignment.center,
+                      child:
+                          animValue >= 0.5
+                              ? Text(
+                                evalText,
+                                style: const TextStyle(
+                                  color: Colors.black,
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              )
+                              : null,
+                    ),
+                  ),
+                  // Black portion (right)
+                  Expanded(
+                    flex: ((1 - animValue) * 1000).round(),
+                    child: Container(
+                      color: Colors.black,
+                      alignment: Alignment.center,
+                      child:
+                          animValue < 0.5
+                              ? Text(
+                                evalText,
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              )
+                              : null,
+                    ),
+                  ),
+                ],
               ),
-              // Black portion (right)
-              Expanded(
-                flex: ((1 - whitePercentage) * 100).round(),
-                child: Container(
-                  color: Colors.black,
-                  alignment: Alignment.center,
-                  child:
-                      whitePercentage < 0.5
-                          ? Text(
-                            evalText,
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 10,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          )
-                          : null,
-                ),
-              ),
-            ],
-          ),
+            );
+          },
         ),
       );
     }

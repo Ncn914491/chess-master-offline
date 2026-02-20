@@ -4,6 +4,7 @@ import 'package:chess_master/core/theme/app_theme.dart';
 import 'package:chess_master/providers/puzzle_provider.dart';
 import 'package:chess_master/screens/puzzles/puzzle_screen.dart';
 import 'package:chess_master/screens/puzzles/daily_puzzle_screen.dart';
+import 'package:chess_master/screens/puzzles/puzzle_history_screen.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 /// Puzzle mode selection
@@ -64,7 +65,10 @@ class _PuzzleMenuScreenState extends ConsumerState<PuzzleMenuScreen> {
           IconButton(
             icon: const Icon(Icons.history, color: AppTheme.textSecondary),
             onPressed: () {
-              // TODO: Navigate to puzzle history
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (context) => const PuzzleHistoryScreen()),
+              );
             },
           ),
         ],
@@ -80,7 +84,7 @@ class _PuzzleMenuScreenState extends ConsumerState<PuzzleMenuScreen> {
               statsAsync.when(
                 data: (stats) => _StatsCard(stats: stats),
                 loading: () => const _StatsCardLoading(),
-                error: (_, __) => const SizedBox.shrink(),
+                error: (error, __) => _StatsCardError(error: error.toString()),
               ),
               const SizedBox(height: 32),
 
@@ -557,5 +561,47 @@ class _ThemeSelector extends StatelessWidget {
           return word[0].toUpperCase() + word.substring(1).toLowerCase();
         })
         .join(' ');
+  }
+}
+
+class _StatsCardError extends StatelessWidget {
+  final String error;
+
+  const _StatsCardError({required this.error});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: AppTheme.cardDark,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: AppTheme.error.withOpacity(0.3)),
+      ),
+      child: Column(
+        children: [
+          const Icon(Icons.error_outline, color: AppTheme.error, size: 36),
+          const SizedBox(height: 12),
+          Text(
+            'Failed to load stats',
+            style: GoogleFonts.inter(
+              color: AppTheme.error,
+              fontWeight: FontWeight.bold,
+              fontSize: 16,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            error,
+            style: GoogleFonts.inter(
+              color: AppTheme.textHint,
+              fontSize: 12,
+            ),
+            textAlign: TextAlign.center,
+          ),
+        ],
+      ),
+    );
   }
 }

@@ -394,6 +394,40 @@ class DatabaseService {
     }, where: 'id = 1');
   }
 
+  // ==================== PUZZLE PROGRESS ====================
+
+  /// Save puzzle progress
+  Future<void> savePuzzleProgress(int puzzleId, bool solved) async {
+    final db = await database;
+    final existing = await db.query(
+      'puzzle_progress',
+      where: 'puzzle_id = ?',
+      whereArgs: [puzzleId],
+    );
+
+    int attempts = 1;
+    if (existing.isNotEmpty) {
+      attempts = (existing.first['attempts'] as int? ?? 0) + 1;
+    }
+
+    await db.insert('puzzle_progress', {
+      'puzzle_id': puzzleId,
+      'attempts': attempts,
+      'solved': solved ? 1 : (existing.isNotEmpty ? existing.first['solved'] : 0),
+      'last_attempted': DateTime.now().millisecondsSinceEpoch,
+    }, conflictAlgorithm: ConflictAlgorithm.replace);
+  }
+
+  /// Get puzzle history
+  Future<List<Map<String, dynamic>>> getPuzzleHistory({int limit = 50}) async {
+    final db = await database;
+    return await db.query(
+      'puzzle_progress',
+      orderBy: 'last_attempted DESC',
+      limit: limit,
+    );
+  }
+
   /// Increment game count
   Future<void> incrementGameStats({
     required bool isWin,

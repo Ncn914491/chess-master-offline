@@ -7,6 +7,9 @@ import 'package:chess_master/core/constants/app_constants.dart';
 import 'package:chess_master/providers/game_provider.dart';
 import 'package:chess_master/providers/engine_provider.dart';
 import 'package:chess_master/screens/game/game_screen.dart';
+import 'package:chess_master/screens/analysis/analysis_screen.dart';
+import 'package:chess/chess.dart' as chess;
+import 'package:chess_master/models/game_model.dart';
 
 /// Provider for game history
 final gameHistoryProvider = FutureProvider<List<Map<String, dynamic>>>((
@@ -329,10 +332,32 @@ class _GameHistoryScreenState extends ConsumerState<GameHistoryScreen> {
     final isCompleted = game['is_completed'] == 1;
 
     if (isCompleted) {
-      // Show game for review/analysis
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Analysis mode coming soon!')),
-      );
+      final pgn = game['pgn'] as String?;
+      if (pgn == null || pgn.isEmpty) {
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('No PGN data available to analyze this game.')),
+          );
+        }
+        return;
+      }
+
+      final moves = _parsePgnToMoves(pgn);
+      if (moves == null || moves.isEmpty) {
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Failed to parse the game moves.')),
+          );
+        }
+        return;
+      }
+
+      if (context.mounted) {
+        Navigator.push(
+          context,
+          MaterialPageRoute(builder: (context) => AnalysisScreen(moves: moves)),
+        );
+      }
       return;
     }
 
@@ -439,6 +464,44 @@ class _GameHistoryScreenState extends ConsumerState<GameHistoryScreen> {
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(const SnackBar(content: Text('Game deleted')));
+    }
+  }
+
+  List<ChessMove>? _parsePgnToMoves(String pgn) {
+    try {
+      final tempBoard = chess.Chess();
+      if (!tempBoard.load_pgn(pgn)) return null;
+
+      final history = tempBoard.getHistory();
+      if (history.isEmpty) return null;
+
+      final moves = <ChessMove>[];
+      final replayBoard = chess.Chess();
+
+      for (var h in history) {
+        final san = h.toString();
+        final success = replayBoard.move(san);
+        if (!success) return null;
+
+        final lastVerbose = replayBoard.getHistory({'verbose': true}).last as Map;
+        moves.add(
+          ChessMove(
+            from: lastVerbose['from'] as String,
+            to: lastVerbose['to'] as String,
+            san: san,
+            promotion: lastVerbose['promotion']?.toString(),
+            capturedPiece: lastVerbose['captured']?.toString(),
+            isCapture: lastVerbose['captured'] != null,
+            isCheck: replayBoard.in_check,
+            isCheckmate: replayBoard.in_checkmate,
+            isCastle: san.contains('O-O'),
+            fen: replayBoard.fen,
+          ),
+        );
+      }
+      return moves;
+    } catch (e) {
+      return null;
     }
   }
 }

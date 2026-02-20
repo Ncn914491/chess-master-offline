@@ -518,7 +518,7 @@ class _PuzzleBoard extends StatelessWidget {
     // Determine if board should be flipped based on puzzle starting position
     // Board should stay oriented to the side that's solving the puzzle
     final puzzle = state.currentPuzzle;
-    final isFlipped = puzzle != null && puzzle.fen.contains(' b ');
+    final isFlipped = puzzle != null && puzzle.fen.contains(' w ');
 
     // Build hint move in UCI format for arrow display
     String? hintMove;
@@ -721,7 +721,7 @@ class _AutoPlaySolutionScreenState extends State<_AutoPlaySolutionScreen> {
   @override
   Widget build(BuildContext context) {
     final isComplete = _currentMoveIndex >= widget.puzzle.moves.length;
-    final isFlipped = widget.puzzle.fen.contains(' b ');
+    final isFlipped = widget.puzzle.fen.contains(' w ');
 
     return Scaffold(
       backgroundColor: AppTheme.backgroundDark,

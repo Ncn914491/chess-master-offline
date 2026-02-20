@@ -450,7 +450,7 @@ class _DailyPuzzleBoard extends StatelessWidget {
 
     // Determine orientation from initial FEN
     // If puzzle starts with black to move, flip board
-    final isFlipped = puzzle.fen.contains(' b ');
+    final isFlipped = puzzle.fen.contains(' w ');
 
     // Build hint move in UCI format for arrow display
     String? hintMove;
@@ -651,7 +651,7 @@ class _AutoPlaySolutionScreenState extends State<_AutoPlaySolutionScreen> {
   @override
   Widget build(BuildContext context) {
     final isComplete = _currentMoveIndex >= widget.puzzle.moves.length;
-    final isFlipped = widget.puzzle.fen.contains(' b ');
+    final isFlipped = widget.puzzle.fen.contains(' w ');
 
     return Scaffold(
       backgroundColor: AppTheme.backgroundDark,

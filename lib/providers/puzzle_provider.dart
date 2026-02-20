@@ -58,6 +58,7 @@ class PuzzleGameState {
   final List<Puzzle> puzzleQueue;
   final bool isLoading;
   final Set<String> highlightedSquares;
+  final bool isRetry;
 
   const PuzzleGameState({
     this.state = PuzzleState.loading,
@@ -80,6 +81,7 @@ class PuzzleGameState {
     this.puzzleQueue = const [],
     this.isLoading = false,
     this.highlightedSquares = const {},
+    this.isRetry = false,
   });
 
   PuzzleGameState copyWith({
@@ -103,6 +105,7 @@ class PuzzleGameState {
     List<Puzzle>? puzzleQueue,
     bool? isLoading,
     Set<String>? highlightedSquares,
+    bool? isRetry,
     bool clearSelection = false,
     bool clearError = false,
     bool clearHint = false,
@@ -130,6 +133,7 @@ class PuzzleGameState {
       puzzleQueue: puzzleQueue ?? this.puzzleQueue,
       isLoading: isLoading ?? this.isLoading,
       highlightedSquares: highlightedSquares ?? this.highlightedSquares,
+      isRetry: isRetry ?? this.isRetry,
     );
   }
 
@@ -408,31 +412,47 @@ class PuzzleNotifier extends StateNotifier<PuzzleGameState> {
         return false;
       }
 
-      // Determine whose turn it is from the FEN
-      // The player should be the one to move in the puzzle position
-      final isPlayerTurn = true; // Player always starts in puzzle position
+      // The Lichess puzzle FEN represents the position BEFORE the opponent's blunder
+      // The first move in puzzle.moves is the opponent's move.
+      if (puzzle.moves.isEmpty) return false;
 
-      debugPrint(
-        '🧩 Loaded puzzle: Turn=${board.turn == chess.Color.WHITE ? "White" : "Black"}, '
-        'First move=${puzzle.moves.isNotEmpty ? puzzle.moves.first : "none"}',
-      );
+      final setupMoveUci = puzzle.moves.first;
+      final from = setupMoveUci.substring(0, 2);
+      final to = setupMoveUci.substring(2, 4);
+      final promotion = setupMoveUci.length > 4 ? setupMoveUci.substring(4, 5) : null;
+
+      final success = board.move({
+        'from': from,
+        'to': to,
+        if (promotion != null) 'promotion': promotion,
+      });
+
+      if (!success) {
+        debugPrint('Failed to apply initial setup move: $setupMoveUci');
+        return false;
+      }
+
+      // Determine whose turn it is from the FEN
+      // The player should be the one to move in the puzzle position AFTER the setup move
+      final isPlayerTurn = true; 
 
       state = state.copyWith(
         currentPuzzle: puzzle,
         board: board,
-        currentMoveIndex: 0,
+        currentMoveIndex: 1, // Player starts at index 1!
         selectedSquare: null,
         legalMoves: [],
-        lastMoveFrom: null,
-        lastMoveTo: null,
+        lastMoveFrom: from,
+        lastMoveTo: to,
         showingHint: false,
         hintsUsed: 0,
         errorMessage: null,
         isPlayerTurn: isPlayerTurn,
-        state: PuzzleState.playing, // Ready to play
+        state: PuzzleState.playing,
         clearSelection: true,
         clearError: true,
         highlightedSquares: {},
+        isRetry: false, // Default not retry, will override in retry function
       );
 
       return true;
@@ -527,22 +547,15 @@ class PuzzleNotifier extends StateNotifier<PuzzleGameState> {
 
       debugPrint('🧩 Wrong move! Expected: $expectedMove, Got: $uciMove');
 
+      // Puzzle failed!
+      _onPuzzleCompleted(false);
+
       state = state.copyWith(
         state: PuzzleState.incorrect,
         errorMessage: 'Not the best move. Try again!',
         clearSelection: true,
       );
 
-      // Reset to try again after delay
-      Future.delayed(const Duration(seconds: 1), () {
-        if (state.state == PuzzleState.incorrect) {
-          state = state.copyWith(
-            state: PuzzleState.playing,
-            isPlayerTurn: true,
-            clearError: true,
-          );
-        }
-      });
       return;
     }
 
@@ -625,6 +638,15 @@ class PuzzleNotifier extends StateNotifier<PuzzleGameState> {
     final puzzle = state.currentPuzzle;
     if (puzzle == null) return;
 
+    if (state.isRetry) {
+      // Don't modify stats or ELO for retries. Just track the state change.
+      state = state.copyWith(
+        state: solved ? PuzzleState.completed : PuzzleState.incorrect,
+        isPlayerTurn: false,
+      );
+      return;
+    }
+
     // Add to recently solved puzzles to avoid duplicates
     _recentlySolvedIds.add(puzzle.id);
     // Keep only the last N puzzles
@@ -667,6 +689,10 @@ class PuzzleNotifier extends StateNotifier<PuzzleGameState> {
 
     // Update database
     final db = _ref.read(databaseServiceProvider);
+    
+    // Save to puzzle progress tracking history
+    await db.savePuzzleProgress(puzzle.id, solved);
+
     final currentStats = await db.getStatistics() ?? {};
     final puzzlesAttempted =
         (currentStats['puzzles_attempted'] as int? ?? 0) + 1;
@@ -798,7 +824,10 @@ class PuzzleNotifier extends StateNotifier<PuzzleGameState> {
     _stopSolutionPlayback();
     final puzzle = state.currentPuzzle;
     if (puzzle != null) {
-      await _loadPuzzle(puzzle);
+      final success = await _loadPuzzle(puzzle);
+      if (success) {
+        state = state.copyWith(isRetry: true);
+      }
     }
   }
 

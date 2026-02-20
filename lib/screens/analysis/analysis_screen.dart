@@ -23,6 +23,7 @@ class AnalysisScreen extends ConsumerStatefulWidget {
 
 class _AnalysisScreenState extends ConsumerState<AnalysisScreen> {
   bool _isAnalyzing = false;
+  bool _isFlipped = false;
 
   @override
   void initState() {
@@ -56,6 +57,15 @@ class _AnalysisScreenState extends ConsumerState<AnalysisScreen> {
         backgroundColor: AppTheme.surfaceDark,
         title: const Text('Game Analysis'),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.flip_camera_android),
+            onPressed: () {
+              setState(() {
+                _isFlipped = !_isFlipped;
+              });
+            },
+            tooltip: 'Flip board',
+          ),
           if (state.originalMoves.isNotEmpty && !state.isAnalyzing)
             IconButton(
               icon: const Icon(Icons.analytics_outlined),
@@ -105,7 +115,7 @@ class _AnalysisScreenState extends ConsumerState<AnalysisScreen> {
                         Expanded(
                           child: AspectRatio(
                             aspectRatio: 1.0,
-                            child: _AnalysisBoard(state: state),
+                            child: _AnalysisBoard(state: state, isFlipped: _isFlipped),
                           ),
                         ),
                       ],
@@ -133,6 +143,9 @@ class _AnalysisScreenState extends ConsumerState<AnalysisScreen> {
                         () => ref.read(analysisProvider.notifier).nextMove(),
                     onLast:
                         () => ref.read(analysisProvider.notifier).lastMove(),
+                    onSliderChanged: (value) {
+                      ref.read(analysisProvider.notifier).goToMove(value.toInt() - 1);
+                    },
                   ),
 
                   // Evaluation graph (only show if we have analysis data)
@@ -219,14 +232,15 @@ class _AnalysisScreenState extends ConsumerState<AnalysisScreen> {
 /// Chess board for analysis mode
 class _AnalysisBoard extends StatelessWidget {
   final AnalysisState state;
+  final bool isFlipped;
 
-  const _AnalysisBoard({required this.state});
+  const _AnalysisBoard({required this.state, this.isFlipped = false});
 
   @override
   Widget build(BuildContext context) {
     return ChessBoard(
       fen: state.fen,
-      isFlipped: false,
+      isFlipped: isFlipped,
       selectedSquare: state.selectedSquare,
       legalMoves: state.legalMoves,
       lastMoveFrom: state.lastMoveFrom,
@@ -328,6 +342,7 @@ class _NavigationControls extends StatelessWidget {
   final VoidCallback onPrevious;
   final VoidCallback onNext;
   final VoidCallback onLast;
+  final ValueChanged<double> onSliderChanged;
 
   const _NavigationControls({
     required this.canGoPrevious,
@@ -338,52 +353,74 @@ class _NavigationControls extends StatelessWidget {
     required this.onPrevious,
     required this.onNext,
     required this.onLast,
+    required this.onSliderChanged,
   });
 
   @override
   Widget build(BuildContext context) {
     return Container(
       padding: const EdgeInsets.symmetric(vertical: 8),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.center,
+      child: Column(
         children: [
-          IconButton(
-            icon: const Icon(Icons.first_page),
-            onPressed: canGoPrevious ? onFirst : null,
-            color: AppTheme.textPrimary,
-            disabledColor: AppTheme.textHint,
-          ),
-          IconButton(
-            icon: const Icon(Icons.chevron_left),
-            onPressed: canGoPrevious ? onPrevious : null,
-            color: AppTheme.textPrimary,
-            disabledColor: AppTheme.textHint,
-          ),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-            decoration: BoxDecoration(
-              color: AppTheme.cardDark,
-              borderRadius: BorderRadius.circular(8),
+          SliderTheme(
+            data: SliderTheme.of(context).copyWith(
+              activeTrackColor: AppTheme.primaryColor,
+              inactiveTrackColor: AppTheme.cardDark,
+              thumbColor: AppTheme.primaryColor,
+              overlayColor: AppTheme.primaryColor.withOpacity(0.2),
+              trackHeight: 4.0,
             ),
-            child: Text(
-              '$currentMove / $totalMoves',
-              style: const TextStyle(
+            child: Slider(
+              value: currentMove.toDouble(),
+              min: 0,
+              max: totalMoves.toDouble(),
+              divisions: totalMoves > 0 ? totalMoves : 1,
+              label: '$currentMove',
+              onChanged: totalMoves > 0 ? onSliderChanged : null,
+            ),
+          ),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              IconButton(
+                icon: const Icon(Icons.first_page),
+                onPressed: canGoPrevious ? onFirst : null,
                 color: AppTheme.textPrimary,
-                fontWeight: FontWeight.bold,
+                disabledColor: AppTheme.textHint,
               ),
-            ),
-          ),
-          IconButton(
-            icon: const Icon(Icons.chevron_right),
-            onPressed: canGoNext ? onNext : null,
-            color: AppTheme.textPrimary,
-            disabledColor: AppTheme.textHint,
-          ),
-          IconButton(
-            icon: const Icon(Icons.last_page),
-            onPressed: canGoNext ? onLast : null,
-            color: AppTheme.textPrimary,
-            disabledColor: AppTheme.textHint,
+              IconButton(
+                icon: const Icon(Icons.chevron_left),
+                onPressed: canGoPrevious ? onPrevious : null,
+                color: AppTheme.textPrimary,
+                disabledColor: AppTheme.textHint,
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                decoration: BoxDecoration(
+                  color: AppTheme.cardDark,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Text(
+                  '$currentMove / $totalMoves',
+                  style: const TextStyle(
+                    color: AppTheme.textPrimary,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+              IconButton(
+                icon: const Icon(Icons.chevron_right),
+                onPressed: canGoNext ? onNext : null,
+                color: AppTheme.textPrimary,
+                disabledColor: AppTheme.textHint,
+              ),
+              IconButton(
+                icon: const Icon(Icons.last_page),
+                onPressed: canGoNext ? onLast : null,
+                color: AppTheme.textPrimary,
+                disabledColor: AppTheme.textHint,
+              ),
+            ],
           ),
         ],
       ),

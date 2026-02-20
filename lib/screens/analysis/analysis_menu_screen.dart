@@ -5,6 +5,8 @@ import 'package:chess_master/core/services/database_service.dart';
 import 'package:chess_master/screens/analysis/analysis_screen.dart';
 import 'package:chess_master/screens/analysis/pgn_import_screen.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:chess/chess.dart' as chess;
+import 'package:chess_master/models/game_model.dart';
 
 /// Analysis menu - choose between PGN import or saved games
 class AnalysisMenuScreen extends ConsumerWidget {
@@ -265,14 +267,64 @@ class SavedGamesListScreen extends ConsumerWidget {
   }
 
   void _analyzeGame(BuildContext context, Map<String, dynamic> game) {
-    // Parse moves from PGN or move list
     final pgn = game['pgn'] as String?;
-    // TODO: Parse PGN to extract moves
-    // For now, navigate to analysis screen
+    if (pgn == null || pgn.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No PGN data available for this game.')),
+      );
+      return;
+    }
+
+    final moves = _parsePgnToMoves(pgn);
+    if (moves == null || moves.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Failed to parse the game moves from PGN.')),
+      );
+      return;
+    }
+
     Navigator.push(
       context,
-      MaterialPageRoute(builder: (context) => const AnalysisScreen()),
+      MaterialPageRoute(builder: (context) => AnalysisScreen(moves: moves)),
     );
+  }
+
+  List<ChessMove>? _parsePgnToMoves(String pgn) {
+    try {
+      final tempBoard = chess.Chess();
+      if (!tempBoard.load_pgn(pgn)) return null;
+
+      final history = tempBoard.getHistory();
+      if (history.isEmpty) return null;
+
+      final moves = <ChessMove>[];
+      final replayBoard = chess.Chess();
+
+      for (var h in history) {
+        final san = h.toString();
+        final success = replayBoard.move(san);
+        if (!success) return null;
+
+        final lastVerbose = replayBoard.getHistory({'verbose': true}).last as Map;
+        moves.add(
+          ChessMove(
+            from: lastVerbose['from'] as String,
+            to: lastVerbose['to'] as String,
+            san: san,
+            promotion: lastVerbose['promotion']?.toString(),
+            capturedPiece: lastVerbose['captured']?.toString(),
+            isCapture: lastVerbose['captured'] != null,
+            isCheck: replayBoard.in_check,
+            isCheckmate: replayBoard.in_checkmate,
+            isCastle: san.contains('O-O'),
+            fen: replayBoard.fen,
+          ),
+        );
+      }
+      return moves;
+    } catch (e) {
+      return null;
+    }
   }
 }
 
@@ -284,9 +336,19 @@ class _SavedGameCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final date = game['created_at'] as String?;
+    final createdAt = game['created_at'] as int?;
+    final dateStr = createdAt != null
+        ? DateTime.fromMillisecondsSinceEpoch(createdAt).toString().split(' ')[0]
+        : 'Unknown date';
+
     final result = game['result'] as String? ?? 'Ongoing';
-    final opponent = game['opponent_name'] as String? ?? 'Unknown';
+    
+    // Determine opponent label based on game mode or custom name
+    final customName = game['custom_name'] as String?;
+    final gameMode = game['game_mode'] as String? ?? 'bot';
+    final botElo = game['bot_elo'] as int? ?? 1200;
+    
+    final opponent = customName ?? (gameMode == 'local' ? 'Friend' : 'Bot ($botElo)');
 
     return GestureDetector(
       onTap: onTap,
@@ -327,7 +389,7 @@ class _SavedGameCard extends StatelessWidget {
                   ),
                   const SizedBox(height: 4),
                   Text(
-                    '$result • ${date ?? 'Unknown date'}',
+                    '$result • $dateStr',
                     style: GoogleFonts.inter(
                       fontSize: 13,
                       color: AppTheme.textSecondary,

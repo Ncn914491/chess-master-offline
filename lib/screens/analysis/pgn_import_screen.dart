@@ -3,8 +3,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:chess_master/core/theme/app_theme.dart';
 import 'package:chess_master/screens/analysis/analysis_screen.dart';
 import 'package:google_fonts/google_fonts.dart';
-
-/// PGN import screen for analysis
+import 'package:chess/chess.dart' as chess;
+import 'package:chess_master/models/game_model.dart';/// PGN import screen for analysis
 class PgnImportScreen extends ConsumerStatefulWidget {
   const PgnImportScreen({super.key});
 
@@ -160,15 +160,60 @@ class _PgnImportScreenState extends ConsumerState<PgnImportScreen> {
       return;
     }
 
-    // TODO: Parse PGN and extract moves
-    // For now, just navigate to analysis screen
+    // Parse PGN to extract moves
+    final moves = _parsePgnToMoves(pgn);
+    if (moves == null || moves.isEmpty) {
+      setState(() {
+        _errorMessage = 'Invalid or empty PGN format.';
+      });
+      return;
+    }
+
     setState(() {
       _errorMessage = null;
     });
 
     Navigator.pushReplacement(
       context,
-      MaterialPageRoute(builder: (context) => const AnalysisScreen()),
+      MaterialPageRoute(builder: (context) => AnalysisScreen(moves: moves)),
     );
+  }
+
+  List<ChessMove>? _parsePgnToMoves(String pgn) {
+    try {
+      final tempBoard = chess.Chess();
+      if (!tempBoard.load_pgn(pgn)) return null;
+
+      final history = tempBoard.getHistory();
+      if (history.isEmpty) return null;
+
+      final moves = <ChessMove>[];
+      final replayBoard = chess.Chess();
+
+      for (var h in history) {
+        final san = h.toString(); // SAN string
+        final success = replayBoard.move(san);
+        if (!success) return null;
+
+        final lastVerbose = replayBoard.getHistory({'verbose': true}).last as Map;
+        moves.add(
+          ChessMove(
+            from: lastVerbose['from'] as String,
+            to: lastVerbose['to'] as String,
+            san: san,
+            promotion: lastVerbose['promotion']?.toString(),
+            capturedPiece: lastVerbose['captured']?.toString(),
+            isCapture: lastVerbose['captured'] != null,
+            isCheck: replayBoard.in_check,
+            isCheckmate: replayBoard.in_checkmate,
+            isCastle: san.contains('O-O'),
+            fen: replayBoard.fen,
+          ),
+        );
+      }
+      return moves;
+    } catch (e) {
+      return null;
+    }
   }
 }
