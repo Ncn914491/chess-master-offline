@@ -271,11 +271,9 @@ class BasicEvaluatorService {
 
     for (int r = 0; r < 8; r++) {
       for (int c = 0; c < 8; c++) {
-        final rankIndex = 8 - r;
-        final fileChar = String.fromCharCode('a'.codeUnitAt(0) + c);
-        final square = '$fileChar$rankIndex';
-
-        final piece = board.get(square);
+        final int rankIndex = 7 - r;
+        final int index = (rankIndex << 4) + c;
+        final piece = board.board[index];
         if (piece == null) continue;
 
         int material = 0;
