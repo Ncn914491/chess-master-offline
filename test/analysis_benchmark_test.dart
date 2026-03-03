@@ -29,7 +29,7 @@ class MockStockfishService implements StockfishService {
   Future<void> initialize() async {}
 
   @override
-  Future<BestMoveResult> getBestMove({
+  Future<BestMoveResult> getBestMove({int? elo,
     required String fen,
     required int depth,
     int? thinkTimeMs,
