@@ -510,8 +510,8 @@ class StockfishService {
   }
 
   /// Dispose the engine
-  void dispose() {
-    _stopEngineIsolate();
+  Future<void> dispose() async {
+    await _killEngineGracefully();
     statusNotifier.value = EngineStatus.disposed;
     _outputController.close();
   }
@@ -550,9 +550,18 @@ class StockfishService {
   }
 
   void _stopEngineIsolate() {
-    _engineCommandPort?.send({'type': 'dispose'});
-    _engineIsolate?.kill(priority: Isolate.immediate);
-    _engineIsolate = null;
+    _killEngineGracefully();
+  }
+
+  Future<void> _killEngineGracefully() async {
+    try {
+      _engineCommandPort?.send({'type': 'stdin', 'command': 'stop\n'});
+      await Future.delayed(const Duration(milliseconds: 800));
+    } catch (_) {}
+    try {
+      _engineIsolate?.kill(priority: Isolate.beforeNextEvent);
+      _engineIsolate = null;
+    } catch (_) {}
     _engineCommandPort = null;
     _engineResponsePort?.close();
     _engineResponsePort = null;

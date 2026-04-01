@@ -35,7 +35,12 @@ class GameSessionViewModel extends StateNotifier<GameSession?> {
     required TimeControl timeControl,
     GameMode gameMode = GameMode.bot,
     BotType botType = BotType.stockfish,
-  }) {
+  }) async {
+    // Reset engine first to ensure clean state for new game
+    final engineNotifier = _ref.read(engineProvider.notifier);
+    engineNotifier.resetForNewGame();
+    await Future.delayed(const Duration(milliseconds: 300));
+
     final session = GameSession.create(
       gameMode: gameMode,
       botType: botType,

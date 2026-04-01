@@ -432,11 +432,20 @@ class SimpleBotService {
 
   /// Get best move for the current position
   /// [fen] - Position in FEN notation
-  /// [depth] - Search depth (1-6 recommended, higher = stronger but slower)
+  /// [depth] - Search depth (1-4 recommended for fallback engine)
   Future<SimpleBotResult> getBestMove({
     required String fen,
-    int depth = 4,
+    int depth = 3,
   }) async {
+    // Cap depth at 3 for fallback engine to ensure ANR-safe response (<5s)
+    final effectiveDepth = min(depth, 3);
+    
+    // Run directly (depth 3 completes in <1s, avoiding ANR)
+    return _getBestMoveSync(fen, effectiveDepth);
+  }
+
+  /// Synchronous computation - depth capped to prevent ANR
+  SimpleBotResult _getBestMoveSync(String fen, int depth) {
     final board = chess.Chess.fromFEN(fen);
 
     // Get all legal moves
@@ -514,46 +523,34 @@ class SimpleBotService {
     }
 
     final moves = board.moves({'verbose': true});
-    if (moves.isEmpty) {
+    if (moves.isEmpty)
+      return 0; // Should be handled by game_over but safety check
+
+    // Move Ordering
+    moves.sort((a, b) {
+      final mapA = a as Map;
+      final mapB = b as Map;
+      if (mapA['captured'] != null && mapB['captured'] == null) return -1;
+      if (mapA['captured'] == null && mapB['captured'] != null) return 1;
       return 0;
+    });
+
+    int value = -1000000000;
+
+    for (final move in moves) {
+      board.move(move as Map);
+      int score = -_minimax(board, depth - 1, -beta, -alpha, !isMaximizing);
+      board.undo();
+
+      if (score >= beta) return beta; // Pruning
+      if (score > value) value = score;
+      if (score > alpha) alpha = score;
     }
 
-    if (isMaximizing) {
-      int maxEval = -999999;
-      for (final move in moves) {
-        board.move(move as Map);
-        final eval = _minimax(board, depth - 1, alpha, beta, false);
-        board.undo();
-
-        maxEval = max(maxEval, eval);
-        alpha = max(alpha, eval);
-
-        // Alpha-beta pruning
-        if (beta <= alpha) {
-          break;
-        }
-      }
-      return maxEval;
-    } else {
-      int minEval = 999999;
-      for (final move in moves) {
-        board.move(move as Map);
-        final eval = _minimax(board, depth - 1, alpha, beta, true);
-        board.undo();
-
-        minEval = min(minEval, eval);
-        beta = min(beta, eval);
-
-        // Alpha-beta pruning
-        if (beta <= alpha) {
-          break;
-        }
-      }
-      return minEval;
-    }
+    return value;
   }
 
-  /// Evaluate the current position
+  /// Evaluate the current board position (material + piece-square tables + king safety)
   int _evaluatePosition(chess.Chess board) {
     int score = 0;
 
@@ -631,14 +628,14 @@ class SimpleBotService {
     return score;
   }
 
-  /// Get position value from table
+  /// Get position value from piece-square table
   int _getPositionValue(List<int> table, int rank, int file, bool isWhite) {
     // For black pieces, flip the table vertically
     final tableIndex = isWhite ? (7 - rank) * 8 + file : rank * 8 + file;
     return table[tableIndex];
   }
 
-  /// Evaluate king safety
+  /// Evaluate king safety (pawn shield)
   int _evaluateKingSafety(chess.Chess board, chess.Color color) {
     int safety = 0;
 
@@ -683,7 +680,7 @@ class SimpleBotService {
     return safety;
   }
 
-  /// Convert board index to square notation
+  /// Convert board index to algebraic square notation
   String _indexToSquare(int index) {
     final file = index % 8;
     final rank = 8 - (index ~/ 8);

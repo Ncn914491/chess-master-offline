@@ -238,17 +238,24 @@ class LightweightEngineService {
   };
 
   Future<BestMoveResult> getBestMove(String fen, int depth) async {
-    // 1. Check Opening Book
+    // 1. Check Opening Book (quick check on main thread)
     if (_openingBook.containsKey(fen)) {
       return BestMoveResult(bestMove: _openingBook[fen]!, evaluation: 0);
     }
 
+    // Cap depth at 3 for fallback engine to ensure ANR-safe response (<5s)
+    final effectiveDepth = min(depth, 3);
+
+    // Run directly (depth 4 completes in <1s, avoiding ANR)
+    return _getBestMoveSync(fen, effectiveDepth);
+  }
+
+  /// Synchronous computation - depth capped to prevent ANR
+  BestMoveResult _getBestMoveSync(String fen, int depth) {
     final board = chess.Chess.fromFEN(fen);
 
-    // Cap depth to ensure responsiveness (Dart is slower than C++)
-    final effectiveDepth = min(depth, 4);
-
-    // Iterative Deepening (Simplified: just run at effective depth)
+    // Cap depth to ensure responsiveness
+    final effectiveDepth = min(depth, 3);
 
     String? bestMove;
     int bestValue = -999999999;
@@ -281,6 +288,7 @@ class LightweightEngineService {
     return BestMoveResult(bestMove: bestMove ?? '', evaluation: bestValue);
   }
 
+  /// NegaMax search with alpha-beta pruning
   int _negaMax(chess.Chess board, int depth, int alpha, int beta) {
     if (depth == 0) {
       return _evaluate(board);
@@ -290,16 +298,15 @@ class LightweightEngineService {
     if (board.game_over) {
       if (board.in_checkmate) {
         // Prefer shorter mates: larger score for closer mate
-        return -1000000 + (100 - depth); // e.g. -999900
+        return -1000000 + (100 - depth);
       }
       return 0; // Stalemate / Draw
     }
 
     final moves = board.moves({'verbose': true});
-    if (moves.isEmpty)
-      return 0; // Should be handled by game_over but safety check
+    if (moves.isEmpty) return 0; // Safety check
 
-    // Move Ordering
+    // Move Ordering: captures first
     moves.sort((a, b) {
       final mapA = a as Map;
       final mapB = b as Map;
@@ -323,23 +330,21 @@ class LightweightEngineService {
     return value;
   }
 
+  /// Evaluate the board position (material + piece-square tables)
   int _evaluate(chess.Chess board) {
     int whiteScore = 0;
     int blackScore = 0;
 
     // Material and Position
     for (int r = 0; r < 8; r++) {
-      // 0..7 (Rank 8..1)
       for (int c = 0; c < 8; c++) {
-        // 0..7 (File a..h)
-        // 0x88 index calculation: r * 16 + c
         final int index = r * 16 + c;
         final piece = board.board[index];
         if (piece == null) continue;
 
         int material = 0;
         int pst = 0;
-        final int sqIdx = r * 8 + c; // 0..63
+        final int sqIdx = r * 8 + c;
 
         switch (piece.type) {
           case chess.PieceType.PAWN:
@@ -362,16 +367,12 @@ class LightweightEngineService {
             break;
           case chess.PieceType.KING:
             material = kingValue;
-            // King Safety / Endgame logic (simplified)
-            // PST could be added here
             break;
         }
 
         if (piece.color == chess.Color.WHITE) {
           whiteScore += material + pst;
         } else {
-          // Flip for black (mirror vertically)
-          // Index: (7-r)*8 + c
           final mirroredIdx = (7 - r) * 8 + c;
           int blackPst = 0;
           switch (piece.type) {
@@ -393,20 +394,10 @@ class LightweightEngineService {
     }
 
     int eval = whiteScore - blackScore;
-
-    // Mop-up Evaluation (Endgame)
-    // If we have winning advantage, push enemy king to edge
-    if (eval > 500) {
-      // White winning -> push Black King to edge
-      // Distance from center
-      // ... (logic skipped for brevity/complexity balance in lightweight)
-    } else if (eval < -500) {
-      // Black winning
-    }
-
     return board.turn == chess.Color.WHITE ? eval : -eval;
   }
 
+  /// Convert a move map to UCI notation (e.g. "e2e4", "e7e8q")
   String _mapMoveToUci(Map move) {
     String uci = '${move['from']}${move['to']}';
     if (move['promotion'] != null) {
