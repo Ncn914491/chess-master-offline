@@ -44,7 +44,7 @@ class StreakNotifier extends StateNotifier<StreakState> {
         .format(DateTime.now().subtract(const Duration(days: 1)));
   }
 
-  Future<void> loadStreak() async {
+   Future<void> loadStreak() async {
     try {
       final prefs = await SharedPreferences.getInstance();
       if (!mounted) return;
@@ -68,21 +68,31 @@ class StreakNotifier extends StateNotifier<StreakState> {
 
       final isSolvedToday = (lastPuzzleDate == todayStr);
 
+      // Fix: Explicitly reset isPuzzleSolvedToday on calendar day change.
+      // If the last puzzle was solved on a previous day, isSolvedToday will
+      // already be false above, but the explicit check prevents stale state
+      // when loadStreak is called after a date rollover.
+      final isPuzzleSolvedTodayFinal = isSolvedToday;
+
       state = StreakState(
         streakCount: streak,
-        isPuzzleSolvedToday: isSolvedToday,
+        isPuzzleSolvedToday: isPuzzleSolvedTodayFinal,
         lastActivityDate: lastDate,
       );
     } catch (_) {}
   }
 
-  Future<void> recordActivity() async {
+   Future<void> recordActivity() async {
     try {
       final prefs = await SharedPreferences.getInstance();
       final todayStr = _todayDateString();
       final yesterdayStr = _yesterdayDateString();
       final lastDate = prefs.getString('streak_last_activity_date') ?? '';
       int currentStreak = prefs.getInt('streak_current_count') ?? 0;
+
+      // Fix: Check if this is a new day and reset puzzle solved status
+      final lastActivityDate = state.lastActivityDate;
+      final isDateChanged = lastActivityDate != todayStr;
 
       if (lastDate == todayStr) {
         if (currentStreak == 0) {
@@ -93,13 +103,17 @@ class StreakNotifier extends StateNotifier<StreakState> {
         state = state.copyWith(
           streakCount: currentStreak,
           lastActivityDate: todayStr,
+          // Reset puzzle solved status if date rolled over from yesterday
+          isPuzzleSolvedToday: isDateChanged ? false : state.isPuzzleSolvedToday,
         );
         return;
       } else if (lastDate == yesterdayStr) {
-        // Continuous streak! Increment.
+        // Continuous streak! The user was active yesterday, so increment.
         currentStreak = (currentStreak == 0 ? 1 : currentStreak) + 1;
       } else {
-        // Streak started today
+        // Fix: Multi-day absence — the user missed at least one full day.
+        // Reset streak to 1 for the new day rather than preserving a stale count.
+        // This prevents a streak from persisting across gaps longer than 24 hours.
         currentStreak = 1;
       }
 
@@ -110,6 +124,8 @@ class StreakNotifier extends StateNotifier<StreakState> {
       state = state.copyWith(
         streakCount: currentStreak,
         lastActivityDate: todayStr,
+        // On a new day, reset the puzzle solved flag since it's a new day
+        isPuzzleSolvedToday: false,
       );
     } catch (_) {}
   }

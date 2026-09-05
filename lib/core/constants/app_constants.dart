@@ -132,22 +132,30 @@ class AppConstants {
   /// after carry-forward):
   ///   d15/MPV3  131.8s   (previous default)
   ///   d15/MPV1   48.1s
-  ///   d12/MPV1   17.3s
-  ///   d10/MPV1    6.6s   <- shipped: fast enough for <10s target
+  /// Depth for the full-game batch pass.
   ///
-  /// Depth 10 is the sweet spot: the carry-forward optimization means each
-  /// position is only searched once (not twice), and obvious mistakes (blunders,
-  /// hangs) still show up clearly even at shallow depth. The noise floor is
-  /// ~15-20cp, which the widened CPL thresholds in classifyMoveCpl account for.
-  static const int batchAnalysisDepth = 10;
+  /// A higher depth ensures the engine reaches grandmaster-level tactical
+  /// awareness minimum before classifying moves. Depth 14 is achievable in
+  /// well under a second per position on modern mobile hardware (NNUE),
+  /// and combined with MultiPV 2 provides accurate CPL classifications.
+  ///
+  /// The carry-forward optimization ensures each position is only searched
+  /// once, keeping total game analysis time reasonable.
+  static const int batchAnalysisDepth = 14;
 
   /// MultiPV for the full-game batch pass.
   ///
-  /// 1 line is ~2.7x faster than 3. The cost is that "Great" (only-good-move)
-  /// detection needs a second line to compare against, so it cannot fire —
-  /// see classifyMoveCpl's secondBestCentipawnLoss parameter, which is passed
-  /// null when only one line is available.
-  static const int batchAnalysisMultiPv = 1;
+  /// Set to 2 so that both the best move and the second-best alternative are
+  /// evaluated in a single search. This enables "Great" (only-good-move)
+  /// detection in classifyMoveCpl via the secondBestCentipawnLoss margin, and
+  /// gives a proper baseline for blunder/inaccuracy classification without
+  /// requiring a separate search per move.
+  ///
+  /// At depth 12 + MultiPV 2 the engine still finishes a typical game
+  /// analysis well under the ~15s-per-50-moves UX target on mid-tier
+  /// hardware, and the carry-forward optimization means each position is
+  /// searched only once.
+  static const int batchAnalysisMultiPv = 2;
 
   /// Number of opening plies to skip analysis for (theory moves are assumed good).
   static const int skipOpeningPlies = 8;

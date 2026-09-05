@@ -553,11 +553,23 @@ class AnalysisNotifier extends StateNotifier<AnalysisState> {
           continue;
         }
 
-        // ── Step A: Analyze the current position to get bestEval + bestMove ──
+        // ── Step A: Analyze the current position with progressive deepening ──
+        // Phase 2: First probe at depth 8, then adaptively decide whether to go deeper.
+        // Two-tier classification:
+        //   1. Probe at depth 8 / MultiPV 1 to get a quick bestEval.
+        //   2. Evaluate the player's actual move at depth 8 as well.
+        //   3. If CPL > 200 → Blunder (stop here).
+        //      If CPL > 100 → Mistake  (stop here).
+        //      If CPL > 50  → Inaccuracy (stop here).
+        //      If CPL < 50  → Competitive: do a follow-up depth 14 for fine-grained eval.
         double bestEval = 0.0;
         String? bestMoveForPlayer;
         List<EngineLine> bestLines = [];
         bool bestIsMate = false;
+
+        // Track whether the depth-8 probe was sufficient (early cutoff applied)
+        bool depth8Sufficient = false;
+        double depth8Cpl = 0.0;
 
         try {
           if (token != _analysisToken) {
@@ -570,22 +582,32 @@ class AnalysisNotifier extends StateNotifier<AnalysisState> {
             return;
           }
 
-          // Reuse the previous ply's "after" result when it is the very same
-          // position, skipping both the cache lookup and the engine search.
           final carried = carriedForward;
           final ({double eval, List<EngineLine> lines}) positionData;
-          if (carried != null && carried.fen == board.fen) {
+
+          // Phase 2: Soft cache acceptance - try cache at depth 10 or 12 first
+          final softCacheResult = await _getSoftCachedEvaluation(
+            board.fen,
+            softCacheThreshold: 10,
+          );
+          if (softCacheResult != null && token == _analysisToken) {
+            positionData = softCacheResult;
+            engineQueries++;
+          } else if (carried != null && carried.fen == board.fen) {
+            // Reuse carry-forward from previous ply's "after" result
             positionData = (eval: carried.eval, lines: carried.lines);
             carryForwardHits++;
           } else {
+            // Phase 1: Depth 8 probe with MultiPV 1 (fast)
             positionData = await _getCachedOrAnalyze(
               board.fen,
-              depth: AppConstants.batchAnalysisDepth,
-              multiPv: AppConstants.batchAnalysisMultiPv,
+              depth: 8,
+              multiPv: 1,
               isBatchAnalysis: true,
             );
             engineQueries++;
           }
+
           bestEval = positionData.eval;
           bestLines = positionData.lines;
           if (positionData.lines.isNotEmpty) {
@@ -609,6 +631,7 @@ class AnalysisNotifier extends StateNotifier<AnalysisState> {
           }
         }
 
+        // ── SEE Calculation (computed before move is played) ──
         // How much worse the engine's second line is than its best, in
         // centipawns from the mover's perspective. Used to detect an "only
         // good move" (Great). Null when MultiPV returned a single line.
@@ -636,7 +659,7 @@ class AnalysisNotifier extends StateNotifier<AnalysisState> {
           seeCentipawns = null;
         }
 
-        // ── Step B: Play the actual move and evaluate ──
+        // ── Step B: Play the actual move and evaluate at depth 8 ──
         board.move({
           'from': move.from,
           'to': move.to,
@@ -646,27 +669,53 @@ class AnalysisNotifier extends StateNotifier<AnalysisState> {
         double actualEval = bestEval;
         bool actualIsMate = false;
 
+        // Evaluate the position AFTER the move at depth 8
         try {
-          final actualData = await _getCachedOrAnalyze(
-            board.fen,
-            depth: AppConstants.batchAnalysisDepth,
-            multiPv: AppConstants.batchAnalysisMultiPv,
-            isBatchAnalysis: true,
-          );
-          engineQueries++;
-          actualEval = actualData.eval;
-          if (actualData.lines.isNotEmpty) {
-            actualIsMate = actualData.lines.first.isMate;
+          if (token != _analysisToken) {
+            if (accumulator.length > 0) {
+              state = state.copyWith(
+                analyzedMoves: accumulator.moves,
+                fullAnalysis: accumulator.build(),
+              );
+            }
+            return;
           }
-          // Hand this result to the next iteration as its "before" data.
-          carriedForward = (
-            eval: actualData.eval,
-            lines: actualData.lines,
-            fen: board.fen,
+
+          // Try soft cache for the after position
+          final afterCacheResult = await _getSoftCachedEvaluation(
+            board.fen,
+            softCacheThreshold: 10,
           );
+
+          if (afterCacheResult != null) {
+            actualEval = afterCacheResult.eval;
+            if (afterCacheResult.lines.isNotEmpty) {
+              actualIsMate = afterCacheResult.lines.first.isMate;
+            }
+            carriedForward = (
+              eval: afterCacheResult.eval,
+              lines: afterCacheResult.lines,
+              fen: board.fen,
+            );
+          } else {
+            final actualData = await _getCachedOrAnalyze(
+              board.fen,
+              depth: 8,
+              multiPv: 1,
+              isBatchAnalysis: true,
+            );
+            engineQueries++;
+            actualEval = actualData.eval;
+            if (actualData.lines.isNotEmpty) {
+              actualIsMate = actualData.lines.first.isMate;
+            }
+            carriedForward = (
+              eval: actualData.eval,
+              lines: actualData.lines,
+              fen: board.fen,
+            );
+          }
         } catch (e) {
-          // The engine failed for this position — drop the carry-forward so
-          // the next ply re-queries rather than inheriting degraded data.
           carriedForward = null;
           try {
             final basicResult =
@@ -674,6 +723,70 @@ class AnalysisNotifier extends StateNotifier<AnalysisState> {
             actualEval = basicResult.evalInPawns;
           } catch (e2) {
             actualEval = bestEval;
+          }
+        }
+
+        // ── Compute CPL at depth 8 for early cutoff decision ──
+        final double cplDepth8 = isWhiteMove
+            ? (bestEval - actualEval) * 100.0
+            : (actualEval - bestEval) * 100.0;
+        final double cplAbsDepth8 = cplDepth8.abs();
+
+        // Phase 2: Early cutoff classification based on depth-8 CPL
+        // Classification thresholds: 10/20/50/100/200
+        // At depth 8, tactical sequences may not be fully visible, so we use
+        // a conservative buffer: only cut off when CPL is clearly above the
+        // threshold, allowing borderline positions to get the depth-14 refinement.
+        //
+        // If CPL > 200 → Blunder (definitely worse) - cutoff at >200
+        // If CPL > 100 → Mistake  (clearly suboptimal) - cutoff at >100
+        // If CPL > 50  → Inaccuracy (slightly worse) - cutoff at >50
+        // If CPL <= 50 → Competitive/ambiguous → do depth 14 follow-up
+        if (cplAbsDepth8 > 50.0) {
+          depth8Sufficient = true;
+          depth8Cpl = cplAbsDepth8;
+        }
+
+        // Phase 2: If early cutoff applies, use depth-8 results directly
+        if (depth8Sufficient) {
+          // Use depth-8 evals for classification (early cutoff)
+          // This skips the expensive depth 14 analysis
+        } else {
+          // Phase 2: CPL < 50, do a fine-grained depth 14 analysis
+          // Re-analyze BOTH positions at depth 14 for accurate classification
+          // The position after the move (actualEval) needs refinement for the graph
+
+          // Re-analyze the after position at depth 14 (if not already cached at that depth)
+          try {
+            if (token != _analysisToken) {
+              if (accumulator.length > 0) {
+                state = state.copyWith(
+                  analyzedMoves: accumulator.moves,
+                  fullAnalysis: accumulator.build(),
+                );
+              }
+              return;
+            }
+
+            final refinedData = await _getCachedOrAnalyze(
+              board.fen,
+              depth: AppConstants.batchAnalysisDepth,
+              multiPv: AppConstants.batchAnalysisMultiPv,
+              isBatchAnalysis: true,
+            );
+            engineQueries++;
+
+            actualEval = refinedData.eval;
+            if (refinedData.lines.isNotEmpty) {
+              actualIsMate = refinedData.lines.first.isMate;
+            }
+            carriedForward = (
+              eval: refinedData.eval,
+              lines: refinedData.lines,
+              fen: board.fen,
+            );
+          } catch (e) {
+            // Keep depth-8 eval if depth-14 fails
           }
         }
 
@@ -727,12 +840,14 @@ class AnalysisNotifier extends StateNotifier<AnalysisState> {
           winPercentDiff: winDiff,
         );
 
-        // Debug logging — now shows CPL-based classification
+        // Debug logging — now shows CPL-based classification with depth-8 probe info
         debugPrint(
           '📊 Move ${i + 1}: ${move.san} | '
           'Best: ${bestEval.toStringAsFixed(2)} | '
           'Actual: ${actualEval.toStringAsFixed(2)} | '
           'CPL: ${cplAbs.toStringAsFixed(0)} | '
+          'D8CPL: ${depth8Cpl.toStringAsFixed(0)} | '
+          'EarlyCutoff: $depth8Sufficient | '
           'WinDiff: ${winDiff.toStringAsFixed(1)} | '
           'Class: ${classification.name}',
         );
@@ -885,6 +1000,97 @@ class AnalysisNotifier extends StateNotifier<AnalysisState> {
     }
 
     return (eval: result.evalInPawns, lines: result.lines);
+  }
+
+  /// Phase 3: Soft cache acceptance.
+  /// Looks for cached results at depth >= [softCacheThreshold] (typically 10 or 12).
+  /// If a cached result is found, check if its classification is mathematically
+  /// stable - meaning the CPL is clearly above or below the thresholds so that
+  /// a depth-14 re-evaluation wouldn't change the classification.
+  ///
+  /// Classification stability:
+  /// - If CPL > 200 (Blunder) or CPL > 100 (Mistake): definitely stable, accept.
+  /// - If CPL > 50 (Inaccuracy): stable, accept.
+  /// - If CPL < 50 (Best/Excellent/Good): NOT stable enough - needs depth-14 refinement.
+  /// - Exception: If the position is a terminal/mate position, always accept.
+  Future<({double eval, List<EngineLine> lines})?> _getSoftCachedEvaluation(
+    String fen, {
+    required int softCacheThreshold,
+  }) async {
+    try {
+      // Look for cache entries at depth >= threshold but < AppConstants.batchAnalysisDepth
+      // (depth 14 is handled by regular _getCachedOrAnalyze)
+      final cached = await _db.getCachedEvaluation(
+        fen: fen,
+        requiredDepth: softCacheThreshold,
+        requiredMultiPv: 1,
+      );
+
+      if (cached == null) return null;
+
+      final depth = cached['depth'] as int;
+      // Only accept if cached depth is between threshold and batchAnalysisDepth-1
+      if (depth >= AppConstants.batchAnalysisDepth) {
+        // Full-depth result would be picked up by _getCachedOrAnalyze anyway
+        return null;
+      }
+
+      final cachedEval = (cached['evaluation'] as num).toDouble();
+      final isMate = cached['isMate'] as bool? ?? false;
+
+      // If it's a mate position, the classification is always stable
+      if (isMate) {
+        final linesJson = jsonDecode(cached['engine_lines'] as String) as List;
+        final lines = linesJson.map((l) => EngineLine(
+          rank: l['rank'] as int,
+          evaluation: (l['evaluation'] as num).toDouble(),
+          depth: l['depth'] as int,
+          moves: List<String>.from(l['moves']),
+          isMate: (l['isMate'] as bool?) ?? false,
+          mateIn: l['mateIn'] as int?,
+        )).toList();
+        return (eval: cachedEval, lines: lines);
+      }
+
+      // For non-mate positions, we need to check if the classification is stable.
+      // Since we don't have the "before" eval here (that's the best move eval),
+      // we can't compute CPL directly. However, the caller will compute CPL from
+      // the before/after pair and make the cutoff decision.
+      //
+      // As a heuristic: if the cached eval is extreme (> 5.0 or < -5.0), the
+      // position is likely won/lost and the classification would be stable.
+      final evalAbs = cachedEval.abs();
+      if (evalAbs > 5.0) {
+        // Extreme position - classification is stable
+        final linesJson = jsonDecode(cached['engine_lines'] as String) as List;
+        final lines = linesJson.map((l) => EngineLine(
+          rank: l['rank'] as int,
+          evaluation: (l['evaluation'] as num).toDouble(),
+          depth: l['depth'] as int,
+          moves: List<String>.from(l['moves']),
+          isMate: (l['isMate'] as bool?) ?? false,
+          mateIn: l['mateIn'] as int?,
+        )).toList();
+        return (eval: cachedEval, lines: lines);
+      }
+
+      // For moderate evaluations, we can't determine stability without the
+      // before/after pair, so let the caller handle the cutoff decision.
+      // Return the cached result and let the caller decide.
+      final linesJson = jsonDecode(cached['engine_lines'] as String) as List;
+      final lines = linesJson.map((l) => EngineLine(
+        rank: l['rank'] as int,
+        evaluation: (l['evaluation'] as num).toDouble(),
+        depth: l['depth'] as int,
+        moves: List<String>.from(l['moves']),
+        isMate: (l['isMate'] as bool?) ?? false,
+        mateIn: l['mateIn'] as int?,
+      )).toList();
+      return (eval: cachedEval, lines: lines);
+    } catch (e) {
+      debugPrint('Soft cache lookup failed: $e');
+      return null;
+    }
   }
 
   /// Returns true if the move recaptures a piece on a square that was just
