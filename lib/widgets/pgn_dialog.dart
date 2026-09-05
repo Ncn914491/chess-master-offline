@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:chess_master/core/theme/app_theme.dart';
+import "package:share_plus/share_plus.dart";
 import 'package:chess_master/core/utils/pgn_parser.dart';
 
 /// Dialog for importing PGN
@@ -173,9 +174,8 @@ class PgnExportDialog extends StatelessWidget {
   }
 
   void _share(BuildContext context) async {
-    // Using the share_plus package would be ideal here
-    // For now, we'll just copy to clipboard
-    _copyToClipboard(context);
+    final box = context.findRenderObject() as RenderBox?;
+    await Share.share(pgn, subject: 'My ChessMaster Game', sharePositionOrigin: box != null ? box.localToGlobal(Offset.zero) & box.size : null);
   }
 
   @override
