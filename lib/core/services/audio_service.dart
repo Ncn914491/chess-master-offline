@@ -1,8 +1,9 @@
+import 'dart:async';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-/// Service for playing chess game sounds
+/// Service for playing chess game sounds without blocking the UI thread.
 class AudioService {
   static AudioService? _instance;
   final AudioPlayer _movePlayer = AudioPlayer();
@@ -12,36 +13,73 @@ class AudioService {
 
   bool _enabled = true;
   bool _initialized = false;
+  bool _isInitializing = false;
 
   static AudioService get instance {
     _instance ??= AudioService._();
     return _instance!;
   }
 
-  AudioService._();
+  AudioService._() {
+    _configureAudioContext();
+  }
 
-  /// Initialize audio players with sources
-  Future<void> initialize() async {
-    if (_initialized) return;
-
+  /// Set up audio context for low latency playback
+  void _configureAudioContext() {
     try {
-      // Preload sounds for faster playback
-      await _movePlayer.setSource(AssetSource('sounds/move.mp3'));
-      await _capturePlayer.setSource(AssetSource('sounds/capture.mp3'));
-      await _checkPlayer.setSource(AssetSource('sounds/check.mp3'));
-      await _gameEndPlayer.setSource(AssetSource('sounds/game_end.mp3'));
-
-      // Reset players after preloading
-      await _movePlayer.stop();
-      await _capturePlayer.stop();
-      await _checkPlayer.stop();
-      await _gameEndPlayer.stop();
-
-      _initialized = true;
+      AudioPlayer.global.setAudioContext(
+        AudioContext(
+          android: const AudioContextAndroid(
+            stayAwake: false,
+            contentType: AndroidContentType.sonification,
+            usageType: AndroidUsageType.game,
+            audioFocus: AndroidAudioFocus.none,
+          ),
+          iOS: AudioContextIOS(
+            category: AVAudioSessionCategory.ambient,
+            options: const {AVAudioSessionOptions.mixWithOthers},
+          ),
+        ),
+      );
     } catch (e) {
-      debugPrint('Failed to initialize audio service: $e');
-      // Continue without sound if initialization fails
+      debugPrint('AudioService: Failed to configure AudioContext: $e');
     }
+  }
+
+  /// Non-blocking, lazy audio player initialization
+  Future<void> initialize() async {
+    if (_initialized || _isInitializing) return;
+    _isInitializing = true;
+
+    // Run initialization asynchronously off the main frame loop
+    unawaited(
+      runZonedGuarded(
+        () async {
+          try {
+            await _movePlayer.setReleaseMode(ReleaseMode.stop);
+            await _capturePlayer.setReleaseMode(ReleaseMode.stop);
+            await _checkPlayer.setReleaseMode(ReleaseMode.stop);
+            await _gameEndPlayer.setReleaseMode(ReleaseMode.stop);
+
+            // Preload sources
+            await _movePlayer.setSource(AssetSource('sounds/move.mp3'));
+            await _capturePlayer.setSource(AssetSource('sounds/capture.mp3'));
+            await _checkPlayer.setSource(AssetSource('sounds/check.mp3'));
+            await _gameEndPlayer.setSource(AssetSource('sounds/game_end.mp3'));
+
+            _initialized = true;
+          } catch (e) {
+            debugPrint('Failed to initialize audio service sources: $e');
+          } finally {
+            _isInitializing = false;
+          }
+        },
+        (error, stack) {
+          debugPrint('AudioService init error: $error');
+          _isInitializing = false;
+        },
+      ),
+    );
   }
 
   /// Enable or disable sound effects
@@ -49,75 +87,64 @@ class AudioService {
     _enabled = enabled;
   }
 
+  /// Safely play audio on a player without blocking main UI thread or throwing
+  void _playSound(AudioPlayer player, AssetSource source) {
+    if (!_enabled) return;
+    unawaited(
+      runZonedGuarded(
+        () async {
+          try {
+            if (_initialized) {
+              await player.seek(Duration.zero);
+              await player.resume();
+            } else {
+              await player.stop();
+              await player.play(source);
+            }
+          } catch (e) {
+            debugPrint('Error playing sound ${source.path}: $e');
+          }
+        },
+        (error, stack) {
+          debugPrint('AudioService sound exception: $error');
+        },
+      ),
+    );
+  }
+
   /// Play move sound
   Future<void> playMove() async {
-    if (!_enabled) return;
-    try {
-      await _movePlayer.stop();
-      await _movePlayer.play(AssetSource('sounds/move.mp3'));
-    } catch (e) {
-      debugPrint('Error playing move sound: $e');
-    }
+    _playSound(_movePlayer, AssetSource('sounds/move.mp3'));
   }
 
   /// Play capture sound
   Future<void> playCapture() async {
-    if (!_enabled) return;
-    try {
-      await _capturePlayer.stop();
-      await _capturePlayer.play(AssetSource('sounds/capture.mp3'));
-    } catch (e) {
-      debugPrint('Error playing capture sound: $e');
-    }
+    _playSound(_capturePlayer, AssetSource('sounds/capture.mp3'));
   }
 
   /// Play check sound
   Future<void> playCheck() async {
-    if (!_enabled) return;
-    try {
-      await _checkPlayer.stop();
-      await _checkPlayer.play(AssetSource('sounds/check.mp3'));
-    } catch (e) {
-      debugPrint('Error playing check sound: $e');
-    }
+    _playSound(_checkPlayer, AssetSource('sounds/check.mp3'));
   }
 
-  /// Play castle sound (same as move for now)
+  /// Play castle sound
   Future<void> playCastle() async {
     await playMove();
   }
 
   /// Play game start sound
   Future<void> playGameStart() async {
-    if (!_enabled) return;
-    try {
-      await _movePlayer.stop();
-      await _movePlayer.play(AssetSource('sounds/game_start.mp3'));
-    } catch (e) {
-      debugPrint('Error playing game start sound: $e');
-    }
+    _playSound(_movePlayer, AssetSource('sounds/game_start.mp3'));
   }
 
   /// Play game end sound
   Future<void> playGameEnd() async {
-    if (!_enabled) return;
-    try {
-      await _gameEndPlayer.stop();
-      await _gameEndPlayer.play(AssetSource('sounds/game_end.mp3'));
-    } catch (e) {
-      debugPrint('Error playing game end sound: $e');
-    }
+    _playSound(_gameEndPlayer, AssetSource('sounds/game_end.mp3'));
   }
 
   /// Play low time warning
   Future<void> playLowTime() async {
-    if (!_enabled) return;
-    try {
-      await _movePlayer.stop();
-      await _movePlayer.play(AssetSource('sounds/low_time.mp3'));
-    } catch (e) {
-      debugPrint('Error playing low time sound: $e');
-    }
+    _playSound(_movePlayer, AssetSource('sounds/low_time.mp3'));
   }
 
   /// Play sound based on move type
@@ -140,7 +167,7 @@ class AudioService {
     }
   }
 
-  /// Dispose audio players
+  /// Dispose audio players safely
   void dispose() {
     _movePlayer.dispose();
     _capturePlayer.dispose();

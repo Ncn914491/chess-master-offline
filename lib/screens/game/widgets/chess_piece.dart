@@ -101,21 +101,25 @@ class PieceAssets {
 
   /// Preload all SVG assets for faster rendering
   static Future<void> preloadAssets(
-    BuildContext context,
-    PieceSet pieceSet,
-  ) async {
-    await Future.wait(
-      allPieceCodes.map((piece) async {
-        try {
-          final loader = SvgAssetLoader(pieceSet.getAssetPath(piece));
-          await svg.cache.putIfAbsent(
-            loader.cacheKey(null),
-            () => loader.loadBytes(null),
-          );
-        } catch (_) {
-          // Asset doesn't exist, will use fallback
-        }
-      }),
-    );
+    BuildContext context, [
+    PieceSet? pieceSet,
+  ]) async {
+    final setsToLoad =
+        pieceSet != null ? [pieceSet] : [PieceSet.traditional, PieceSet.modern];
+    final futures = <Future<void>>[];
+    for (final set in setsToLoad) {
+      for (final piece in allPieceCodes) {
+        futures.add(() async {
+          try {
+            final loader = SvgAssetLoader(set.getAssetPath(piece));
+            await svg.cache.putIfAbsent(
+              loader.cacheKey(null),
+              () => loader.loadBytes(null),
+            );
+          } catch (_) {}
+        }());
+      }
+    }
+    await Future.wait(futures);
   }
 }
