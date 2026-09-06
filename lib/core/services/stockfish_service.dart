@@ -1,3 +1,4 @@
+import 'package:chess/chess.dart' as chess_lib;
 import 'dart:async';
 import 'dart:io' show Platform;
 import 'dart:isolate';
@@ -19,6 +20,35 @@ class _QueuedCommand {
 
 /// Service class for interacting with the Stockfish chess engine
 /// Uses UCI (Universal Chess Interface) protocol
+
+/// Serialized execution queue for engine operations.
+/// Prevents concurrent command sequences from interleaving and causing
+/// native Stockfish C++ data races or memory corruption.
+class _EngineExecutionQueue {
+  Future<void> _lastOperation = Future.value();
+
+  Future<T> run<T>(Future<T> Function() action) {
+    final completer = Completer<T>();
+    _lastOperation = _lastOperation
+        .then((_) async {
+          try {
+            final result = await action();
+            completer.complete(result);
+          } catch (e, st) {
+            completer.completeError(e, st);
+          }
+        })
+        .catchError((_) {
+          // Prevents queue stall if previous operation failed
+        });
+    return completer.future;
+  }
+
+  void clear() {
+    _lastOperation = Future.value();
+  }
+}
+
 class StockfishService {
   static final _fenSpaceRegex = RegExp(r'\s+');
   static final _fenDigitRegex = RegExp(r'[1-8]');
@@ -27,6 +57,7 @@ class StockfishService {
   bool _isReady = false;
   bool _isEngineBusy = false; // True when a search is claimed/in progress
   final List<_QueuedCommand> _commandQueue = [];
+  final _EngineExecutionQueue _executionQueue = _EngineExecutionQueue();
   bool _useFallback = false;
 
   // Per-search identity token. A bestmove line is only accepted by the search
@@ -133,7 +164,10 @@ class StockfishService {
   /// Puts the service in a fake "ready, non-fallback" state so tests can drive
   /// the search pipeline by injecting engine output lines.
   @visibleForTesting
-  void setReadyForTesting({bool immediateReadyOk = false, SendPort? commandPort}) {
+  void setReadyForTesting({
+    bool immediateReadyOk = false,
+    SendPort? commandPort,
+  }) {
     _isReady = true;
     _useFallback = false;
     _forceFallback = false;
@@ -185,11 +219,14 @@ class StockfishService {
     // Only activate if we've had actual isolate crashes (not just init failures).
     // Reset counter if we've been in fallback for a while (recovery window).
     if (_consecutiveCrashes >= _maxConsecutiveCrashes) {
-      final timeSinceFallback = _lastFallbackTime != null
-          ? DateTime.now().difference(_lastFallbackTime!)
-          : Duration.zero;
+      final timeSinceFallback =
+          _lastFallbackTime != null
+              ? DateTime.now().difference(_lastFallbackTime!)
+              : Duration.zero;
       if (timeSinceFallback < const Duration(minutes: 5)) {
-        _enableFallback('Circuit breaker: $_consecutiveCrashes consecutive crashes');
+        _enableFallback(
+          'Circuit breaker: $_consecutiveCrashes consecutive crashes',
+        );
         return;
       } else {
         // Recovery window elapsed — reset and try again
@@ -248,8 +285,12 @@ class StockfishService {
 
         // --- Step 4: Send engine options ---
         debugPrint('ENGINE INIT: Applying engine options');
-        _sendCommandDirect('setoption name Threads value $livePlayThreads'); // Single thread for stability
-        _sendCommandDirect('setoption name Hash value $livePlayHashMb'); // 32MB to reduce memory pressure
+        _sendCommandDirect(
+          'setoption name Threads value $livePlayThreads',
+        ); // Single thread for stability
+        _sendCommandDirect(
+          'setoption name Hash value $livePlayHashMb',
+        ); // 32MB to reduce memory pressure
         _sendCommandDirect('setoption name UCI_LimitStrength value true');
 
         // --- Step 5: Send "isready", wait for "readyok" ---
@@ -525,6 +566,47 @@ class StockfishService {
   @visibleForTesting
   bool isValidFenForTesting(String fen) => _isValidFen(fen);
 
+  /// Validate that a sequence of UCI moves is legal starting from [startingFen] or [fen].
+  bool _areMovesLegal(String fen, String? startingFen, List<String>? moves) {
+    if (moves == null || moves.isEmpty) return true;
+    try {
+      final baseFen =
+          (startingFen != null && startingFen.isNotEmpty) ? startingFen : fen;
+
+      if (!_isValidFen(baseFen)) return false;
+
+      final chess = chess_lib.Chess.fromFEN(baseFen);
+      for (final moveStr in moves) {
+        if (moveStr.isEmpty || moveStr.length < 4) return false;
+        final from = moveStr.substring(0, 2);
+        final to = moveStr.substring(2, 4);
+        final promotion = moveStr.length > 4 ? moveStr[4] : null;
+
+        final moveObj = {
+          'from': from,
+          'to': to,
+          if (promotion != null) 'promotion': promotion,
+        };
+
+        final result = chess.move(moveObj);
+        if (result == false) {
+          return false; // Illegal move in sequence
+        }
+      }
+      return true;
+    } catch (e) {
+      debugPrint('Move sequence validation failed: $e');
+      return false;
+    }
+  }
+
+  @visibleForTesting
+  bool areMovesLegalForTesting(
+    String fen,
+    String? startingFen,
+    List<String>? moves,
+  ) => _areMovesLegal(fen, startingFen, moves);
+
   /// Internal FEN validation to prevent native Stockfish C++ engine crashes (SIGSEGV).
   /// Enforces board structure, piece counts, valid kings, castling, move numbers,
   /// pawn placement, and king adjacency.
@@ -589,8 +671,10 @@ class StockfishService {
     if (whiteKingCount != 1 || blackKingCount != 1) return false;
 
     // Kings must not be adjacent (would mean illegal position with both kings in check)
-    if (whiteKingRow != null && blackKingRow != null &&
-        whiteKingCol != null && blackKingCol != null) {
+    if (whiteKingRow != null &&
+        blackKingRow != null &&
+        whiteKingCol != null &&
+        blackKingCol != null) {
       final rowDiff = (whiteKingRow - blackKingRow).abs();
       final colDiff = (whiteKingCol - blackKingCol).abs();
       if (rowDiff <= 1 && colDiff <= 1) return false;
@@ -625,8 +709,12 @@ class StockfishService {
       // If castling rights exist, king must be on e1/e8
       if (castling.contains('K') && !rows[7].contains('K')) return false;
       // White king on e1 for any white castling
-      if ((castling.contains('K') || castling.contains('Q')) && whiteKingRow != 7) return false;
-      if ((castling.contains('k') || castling.contains('q')) && blackKingRow != 0) return false;
+      if ((castling.contains('K') || castling.contains('Q')) &&
+          whiteKingRow != 7)
+        return false;
+      if ((castling.contains('k') || castling.contains('q')) &&
+          blackKingRow != 0)
+        return false;
     }
 
     // En passant check
@@ -684,7 +772,7 @@ class StockfishService {
     List<String>? moves,
   }) async {
     // Validate FEN to prevent SIGSEGV in Stockfish::Position::is_draw
-    if (!_isValidFen(fen)) {
+    if (!_isValidFen(fen) || !_areMovesLegal(fen, startingFen, moves)) {
       debugPrint('Invalid FEN detected: $fen. Using fallback.');
       return _getSimpleBotMove(fen, depth, thinkTimeMs);
     }
@@ -715,131 +803,153 @@ class StockfishService {
       return _getSimpleBotMove(fen, depth, thinkTimeMs);
     }
 
-    // Claim the engine slot synchronously after the readiness guards so that
-    // overlapping calls are rejected atomically — there is no await between the
-    // busy check and the claim for another caller to race through.
-    if (_isEngineBusy) {
-      debugPrint('Engine is busy, using fallback for FEN: $fen');
-      return _getSimpleBotMove(fen, depth, thinkTimeMs);
-    }
-    _isEngineBusy = true;
-
-    final searchId = ++_activeSearchId;
-    StreamSubscription<String>? subscription;
-
-    try {
-      // Stop any lingering search from a previous call BEFORE attaching our
-      // listener, so a stale bestmove line cannot be consumed by this search.
-      await _stopCurrentSearchAndWait();
-
-      final completer = Completer<BestMoveResult>();
-      String? bestMove;
-      String? ponderMove;
-      int? evaluation;
-      int? mateIn;
-
-      subscription = _outputController.stream.listen((line) {
-        if (searchId != _activeSearchId) {
-          subscription?.cancel();
-          return;
-        }
-
-        final trimmedLine = line.trim();
-
-        // Parse evaluation from info line.
-        // Stockfish's "score cp" is from the side-to-move's perspective.
-        // Convert to white-relative for consistent storage.
-        if (trimmedLine.startsWith('info') && trimmedLine.contains('score')) {
-          final scoreMatch = _scoreCpRegex.firstMatch(trimmedLine);
-          if (scoreMatch != null) {
-            evaluation = _toWhiteRelative(int.parse(scoreMatch.group(1)!), fen);
-          }
-
-          final mateMatch = _scoreMateRegex.firstMatch(trimmedLine);
-          if (mateMatch != null) {
-            final rawMate = mateToWhiteRelative(
-              int.parse(mateMatch.group(1)!),
-              fen,
-            );
-            mateIn = rawMate;
-            // Convert mate to centipawn value for consistent evaluation
-            evaluation = rawMate > 0 ? (10000 - rawMate * 10) : (-10000 + rawMate.abs() * 10);
-          }
-        }
-
-        // Parse best move
-        if (trimmedLine.startsWith('bestmove')) {
-          final parts = trimmedLine.split(' ');
-          if (parts.length >= 2) {
-            bestMove = parts[1];
-          }
-          if (parts.length >= 4 && parts[2] == 'ponder') {
-            ponderMove = parts[3];
-          }
-
-          subscription?.cancel();
-          if (!completer.isCompleted) {
-            completer.complete(
-              BestMoveResult(
-                bestMove: bestMove ?? '',
-                ponderMove: ponderMove,
-                evaluation: evaluation,
-                mateIn: mateIn,
-              ),
-            );
-          }
-        }
-      });
-
-      // Position must be set before search.
-      // Strength options (UCI_Elo / UCI_LimitStrength) are configured via setSkillLevel()
-      // before calling getBestMove() and should NOT be set here on every move.
-      // Send the full starting FEN + move list when available so the engine can
-      // detect threefold/fifty-move repetition draws.
-      _sendCommand(
-        buildPositionCommand(fen: fen, startingFen: startingFen, moves: moves),
-      );
-
-      // Wait for engine to confirm position is processed before starting search
-      // This prevents SIGSEGV in Stockfish::Position::is_draw by ensuring position is valid
-      final positionReady = await _waitForReadyOk(
-        timeout: const Duration(milliseconds: 1500),
-      );
-      if (!positionReady) {
-        debugPrint('Position ready timeout for FEN: $fen. Using fallback.');
+    return _executionQueue.run(() async {
+      if (_isDisposed) {
+        return _getSimpleBotMove(fen, depth, thinkTimeMs);
+      }
+      if (_useFallback && _shouldRetryInit()) {
+        await _tryFallbackRecovery();
+      }
+      if (!_isReady && !_useFallback) {
+        await initialize();
+      }
+      if (_useFallback || !_isReady) {
         return _getSimpleBotMove(fen, depth, thinkTimeMs);
       }
 
-      // UCI search command strategy:
-      //   Bot play  → "go movetime <ms>" — time-bounded search (no depth limit)
-      //   Analysis  → "go depth <depth>" — depth-bounded search (no time limit)
-      //
-      // Never combine depth and movetime in one "go" command (ISSUE-006).
-      if (thinkTimeMs != null) {
-        _searchInFlight = true;
-        _sendCommand('go movetime $thinkTimeMs');
-      } else {
-        _searchInFlight = true;
-        _sendCommand('go depth $depth');
+      if (_isEngineBusy) {
+        debugPrint('Engine is busy, using fallback for FEN: $fen');
+        return _getSimpleBotMove(fen, depth, thinkTimeMs);
       }
+      _isEngineBusy = true;
 
-      // Failsafe timeout for Stockfish response.
-      return await completer.future.timeout(
-        searchTimeoutForTesting,
-        onTimeout: () {
-          debugPrint(
-            'ENGINE RECOVERY → Search timeout for FEN: $fen, using fallback for this move',
-          );
-          _sendCommand('stop');
-          // Don't kill isolate or enable permanent fallback — engine may recover
+      final searchId = ++_activeSearchId;
+      StreamSubscription<String>? subscription;
+
+      try {
+        // Stop any lingering search from a previous call BEFORE attaching our
+        // listener, so a stale bestmove line cannot be consumed by this search.
+        await _stopCurrentSearchAndWait();
+
+        final completer = Completer<BestMoveResult>();
+        String? bestMove;
+        String? ponderMove;
+        int? evaluation;
+        int? mateIn;
+
+        subscription = _outputController.stream.listen((line) {
+          if (searchId != _activeSearchId) {
+            subscription?.cancel();
+            return;
+          }
+
+          final trimmedLine = line.trim();
+
+          // Parse evaluation from info line.
+          // Stockfish's "score cp" is from the side-to-move's perspective.
+          // Convert to white-relative for consistent storage.
+          if (trimmedLine.startsWith('info') && trimmedLine.contains('score')) {
+            final scoreMatch = _scoreCpRegex.firstMatch(trimmedLine);
+            if (scoreMatch != null) {
+              evaluation = _toWhiteRelative(
+                int.parse(scoreMatch.group(1)!),
+                fen,
+              );
+            }
+
+            final mateMatch = _scoreMateRegex.firstMatch(trimmedLine);
+            if (mateMatch != null) {
+              final rawMate = mateToWhiteRelative(
+                int.parse(mateMatch.group(1)!),
+                fen,
+              );
+              mateIn = rawMate;
+              // Convert mate to centipawn value for consistent evaluation
+              evaluation =
+                  rawMate > 0
+                      ? (10000 - rawMate * 10)
+                      : (-10000 + rawMate.abs() * 10);
+            }
+          }
+
+          // Parse best move
+          if (trimmedLine.startsWith('bestmove')) {
+            final parts = trimmedLine.split(' ');
+            if (parts.length >= 2) {
+              bestMove = parts[1];
+            }
+            if (parts.length >= 4 && parts[2] == 'ponder') {
+              ponderMove = parts[3];
+            }
+
+            subscription?.cancel();
+            if (!completer.isCompleted) {
+              completer.complete(
+                BestMoveResult(
+                  bestMove: bestMove ?? '',
+                  ponderMove: ponderMove,
+                  evaluation: evaluation,
+                  mateIn: mateIn,
+                ),
+              );
+            }
+          }
+        });
+
+        // Position must be set before search.
+        // Strength options (UCI_Elo / UCI_LimitStrength) are configured via setSkillLevel()
+        // before calling getBestMove() and should NOT be set here on every move.
+        // Send the full starting FEN + move list when available so the engine can
+        // detect threefold/fifty-move repetition draws.
+        _sendCommand(
+          buildPositionCommand(
+            fen: fen,
+            startingFen: startingFen,
+            moves: moves,
+          ),
+        );
+
+        // Wait for engine to confirm position is processed before starting search
+        // This prevents SIGSEGV in Stockfish::Position::is_draw by ensuring position is valid
+        final positionReady = await _waitForReadyOk(
+          timeout: const Duration(milliseconds: 1500),
+        );
+        if (!positionReady) {
+          debugPrint('Position ready timeout for FEN: $fen. Using fallback.');
           return _getSimpleBotMove(fen, depth, thinkTimeMs);
-        },
-      );
-    } finally {
-      subscription?.cancel();
-      _searchInFlight = false;
-      _isEngineBusy = false;
-    }
+        }
+
+        // UCI search command strategy:
+        //   Bot play  → "go movetime <ms>" — time-bounded search (no depth limit)
+        //   Analysis  → "go depth <depth>" — depth-bounded search (no time limit)
+        //
+        // Never combine depth and movetime in one "go" command (ISSUE-006).
+        if (thinkTimeMs != null) {
+          _searchInFlight = true;
+          _sendCommand('go movetime $thinkTimeMs');
+        } else {
+          _searchInFlight = true;
+          _sendCommand('go depth $depth');
+        }
+
+        // Failsafe timeout for Stockfish response.
+        return await completer.future.timeout(
+          searchTimeoutForTesting,
+          onTimeout: () {
+            debugPrint(
+              'ENGINE RECOVERY → Search timeout for FEN: $fen, using fallback for this move',
+            );
+            _sendCommand('stop');
+            // Don't kill isolate or enable permanent fallback — engine may recover
+            return _getSimpleBotMove(fen, depth, thinkTimeMs);
+          },
+        );
+      } finally {
+        subscription?.cancel();
+        _searchInFlight = false;
+        _isEngineBusy = false;
+      }
+    });
   }
 
   /// Map the requested depth to a safe fallback depth based on difficulty.
@@ -913,7 +1023,7 @@ class StockfishService {
     int? nodes,
   }) async {
     // Validate FEN to prevent SIGSEGV
-    if (!_isValidFen(fen)) {
+    if (!_isValidFen(fen) || !_areMovesLegal(fen, startingFen, moves)) {
       debugPrint('Invalid FEN detected for analysis: $fen');
       return BasicEvaluatorService.instance.analyze(fen);
     }
@@ -941,259 +1051,289 @@ class StockfishService {
     // Dedup: if a search for the same FEN is already running, await it instead
     // of starting a new search. This prevents overlapping searches and ensures
     // both callers get the same result.
-    if (_pendingAnalysis != null && _pendingAnalysisFen == fen && _isEngineBusy) {
+    if (_pendingAnalysis != null &&
+        _pendingAnalysisFen == fen &&
+        _isEngineBusy) {
       return _pendingAnalysis!;
     }
 
-    // If engine is busy with a different search, stop it first
-    if (_isEngineBusy || _searchInFlight) {
-      await _stopCurrentSearchAndWait();
-    }
-    _isEngineBusy = true;
-
-    // Track this search for dedup
-    _pendingAnalysisFen = fen;
-    final analysisCompleter = Completer<AnalysisResult>();
-    _pendingAnalysis = analysisCompleter.future;
-
-    final searchId = ++_activeSearchId;
-    final callStarted = DateTime.now();
-    StreamSubscription<String>? subscription;
-
-    try {
-      // Stop any lingering search from a previous call BEFORE attaching our
-      // listener, so a stale bestmove line cannot be consumed by this analysis.
-      final wasStopped = _searchInFlight;
-      await _stopCurrentSearchAndWait();
-
-      // Reset engine state before new analysis to prevent SIGSEGV from stale TT entries.
-      // Only send ucinewgame when we actually stopped a previous search, to avoid
-      // unnecessary engine overhead on the common first-call path.
-      //
-      // During a sequential full-game pass this is suppressed: each ply issues
-      // back-to-back searches, so ucinewgame fired every ply and wiped the
-      // transposition table between positions that differ by a single move.
-      // Keeping the TT lets the engine reuse that work.
-      if (wasStopped && !isBatchAnalysis) {
-        _sendCommandDirect('ucinewgame');
+    return _executionQueue.run(() async {
+      if (_isDisposed) {
+        return BasicEvaluatorService.instance.analyze(fen);
       }
-
-      // Set MultiPV for multiple lines
-      _sendCommand('setoption name MultiPv value $multiPv');
-
-      final completer = analysisCompleter;
-      final lines = <EngineLine>[];
-      int? mainEvaluation;
-      int? mateIn;
-
-      // Per-depth accumulation so the final result can be taken from the
-      // deepest COMPLETED iteration rather than whatever was mid-flight when
-      // `bestmove` arrived. Keyed by depth, then by MultiPV rank.
-      final linesByDepth = <int, Map<int, EngineLine>>{};
-      final evalByDepth = <int, int?>{};
-      final mateByDepth = <int, int?>{};
-
-      subscription = _outputController.stream.listen((line) {
-        if (searchId != _activeSearchId) {
-          subscription?.cancel();
-          return;
-        }
-
-        final trimmedLine = line.trim();
-
-        if (trimmedLine.startsWith('info') && trimmedLine.contains('pv')) {
-          final pvMatch = _multiPvRegex.firstMatch(trimmedLine);
-          final depthMatch = _depthRegex.firstMatch(trimmedLine);
-          final scoreMatch = _scoreCpRegex.firstMatch(trimmedLine);
-          final mateMatch = _scoreMateRegex.firstMatch(trimmedLine);
-          final pvMovesMatch = _pvMovesRegex.firstMatch(trimmedLine);
-
-          if (pvMovesMatch != null) {
-            final pvNumber = pvMatch != null ? int.parse(pvMatch.group(1)!) : 1;
-            final currentDepth =
-                depthMatch != null ? int.parse(depthMatch.group(1)!) : 0;
-            int? eval;
-            int? mate;
-
-            if (scoreMatch != null) {
-              eval = _toWhiteRelative(int.parse(scoreMatch.group(1)!), fen);
-            }
-            if (mateMatch != null) {
-              mate = mateToWhiteRelative(
-                int.parse(mateMatch.group(1)!),
-                fen,
-              );
-            }
-
-            final moves = pvMovesMatch.group(1)!.split(' ');
-
-            // Convert mate score to centipawns for consistent handling.
-            // Mate in N → large centipawn value so classifyMate() works.
-            // White-relative: positive = white mates, negative = black mates.
-            int? effectiveEval = eval;
-            if (mate != null) {
-              // Mate in N moves: use a large value that decreases as mate gets farther.
-              // 10000 - mate*10 ensures mate-in-1 >> mate-in-2 >> ... >> best non-mate.
-              effectiveEval = mate > 0 ? (10000 - mate * 10) : (-10000 + mate.abs() * 10);
-            }
-
-            final engineLine = EngineLine(
-              rank: pvNumber,
-              evaluation: (effectiveEval ?? 0) / 100.0,
-              depth: currentDepth,
-              moves: moves,
-              isMate: mate != null,
-              mateIn: mate,
-            );
-
-            // ── Deterministic result capture ──
-            // Stockfish emits a full set of MultiPV lines for depth 1, then 2,
-            // and so on. Overwriting a single flat list meant the captured
-            // result depended on exactly which iteration was in flight when
-            // `bestmove` arrived — the same position could resolve at a
-            // different depth, or with lines from two different depths mixed,
-            // on every run. Group lines by the depth that produced them and
-            // only publish a completed iteration (see `bestmove` below).
-            final bucket = linesByDepth.putIfAbsent(currentDepth, () => {});
-            bucket[pvNumber] = engineLine;
-
-            if (pvNumber == 1) {
-              evalByDepth[currentDepth] = effectiveEval;
-              mateByDepth[currentDepth] = mate;
-
-              // Progressive UI updates may use the in-flight iteration; only
-              // the final committed result has to be deterministic.
-              mainEvaluation = effectiveEval;
-              mateIn = mate;
-            }
-
-            // Keep the live view in sync for onUpdate consumers.
-            if (lines.length >= pvNumber) {
-              lines[pvNumber - 1] = engineLine;
-            } else {
-              lines.add(engineLine);
-            }
-
-            if (onUpdate != null && mainEvaluation != null) {
-              onUpdate(
-                AnalysisResult(
-                  evaluation: mainEvaluation!,
-                  mateIn: mateIn,
-                  lines: List.from(lines),
-                  depth: currentDepth,
-                ),
-              );
-            }
-          }
-        }
-
-        if (trimmedLine.startsWith('bestmove')) {
-          subscription?.cancel();
-          // Reset MultiPV to 1
-          _sendCommand('setoption name MultiPV value 1');
-
-          if (!completer.isCompleted) {
-            // Publish the deepest iteration that produced a COMPLETE set of
-            // MultiPV lines. A partially-emitted deeper iteration is discarded,
-            // so the same position always resolves to the same eval instead of
-            // depending on when `bestmove` happened to interrupt the search.
-            int? bestDepth;
-            for (final entry in linesByDepth.entries) {
-              final complete = entry.value.length >= multiPv;
-              if (!complete) continue;
-              if (bestDepth == null || entry.key > bestDepth) {
-                bestDepth = entry.key;
-              }
-            }
-            // If no iteration completed (very short search), fall back to the
-            // deepest partial one so a result is still returned.
-            bestDepth ??= linesByDepth.keys.isEmpty
-                ? null
-                : linesByDepth.keys.reduce((a, b) => a > b ? a : b);
-
-            final committedLines = bestDepth == null
-                ? lines
-                : (linesByDepth[bestDepth]!.entries.toList()
-                      ..sort((a, b) => a.key.compareTo(b.key)))
-                    .map((e) => e.value)
-                    .toList();
-
-            completer.complete(
-              AnalysisResult(
-                evaluation: bestDepth == null
-                    ? (mainEvaluation ?? 0)
-                    : (evalByDepth[bestDepth] ?? mainEvaluation ?? 0),
-                mateIn:
-                    bestDepth == null ? mateIn : mateByDepth[bestDepth],
-                lines: committedLines,
-                depth: bestDepth ?? depth,
-              ),
-            );
-          }
-        }
-      });
-
-      // Ensure engine is at max strength for analysis (after stop, before position)
-      if (!_useFallback) {
-        setMaxStrength();
+      if (_useFallback && _shouldRetryInit()) {
+        await _tryFallbackRecovery();
       }
-
-      // Set position and analyze
-      _sendCommand(
-        buildPositionCommand(fen: fen, startingFen: startingFen, moves: moves),
-      );
-
-      // Wait for engine to confirm position is processed before starting search
-      final positionReady = await _waitForReadyOk(
-        timeout: const Duration(milliseconds: 500),
-      );
-      if (!positionReady) {
+      if (!_isReady && !_useFallback) {
+        await initialize();
+      }
+      if (_useFallback || !_isReady) {
         debugPrint(
-          'Position ready timeout for analysis FEN: $fen. Using fallback.',
+          'Engine not ready for analysis, using fallback for FEN: $fen',
         );
         return BasicEvaluatorService.instance.analyze(fen);
       }
 
-      _searchInFlight = true;
-      // Node-bounded search caps total work regardless of device speed.
-      // (Reproducibility comes from the completed-iteration capture in the
-      // bestmove handler, not from the search bound itself.)
-      _sendCommand(nodes != null ? 'go nodes $nodes' : 'go depth $depth');
-      final searchStarted = DateTime.now();
-
-      final searchResult = await completer.future.timeout(
-        analysisTimeoutForTesting, // Short timeout for analysis to switch to basic if stuck
-        onTimeout: () {
-          debugPrint(
-            'ENGINE RECOVERY → Analysis timeout for FEN: $fen, using fallback',
-          );
-          _sendCommand('stop');
-          _sendCommand('setoption name MultiPV value 1');
-          // Don't kill isolate or enable permanent fallback — engine may recover
-          return BasicEvaluatorService.instance.analyze(fen);
-        },
-      );
-
-      // Overhead accounting: how much of this call was actual searching versus
-      // the surrounding stop/position/isready/MultiPV round trips.
-      final searchMs =
-          DateTime.now().difference(searchStarted).inMilliseconds;
-      final totalMs = DateTime.now().difference(callStarted).inMilliseconds;
-      debugPrint(
-        '⏱️ SEARCH totalMs=$totalMs searchMs=$searchMs '
-        'overheadMs=${totalMs - searchMs}',
-      );
-
-      return searchResult;
-    } finally {
-      subscription?.cancel();
-      _searchInFlight = false;
-      _isEngineBusy = false;
-      if (_pendingAnalysisFen == fen) {
-        _pendingAnalysis = null;
-        _pendingAnalysisFen = null;
+      if (_pendingAnalysis != null &&
+          _pendingAnalysisFen == fen &&
+          _isEngineBusy) {
+        return _pendingAnalysis!;
       }
-    }
+
+      if (_isEngineBusy || _searchInFlight) {
+        await _stopCurrentSearchAndWait();
+      }
+      _isEngineBusy = true;
+
+      // Track this search for dedup
+      _pendingAnalysisFen = fen;
+      final analysisCompleter = Completer<AnalysisResult>();
+      _pendingAnalysis = analysisCompleter.future;
+
+      final searchId = ++_activeSearchId;
+      final callStarted = DateTime.now();
+      StreamSubscription<String>? subscription;
+
+      try {
+        // Stop any lingering search from a previous call BEFORE attaching our
+        // listener, so a stale bestmove line cannot be consumed by this analysis.
+        final wasStopped = _searchInFlight;
+        await _stopCurrentSearchAndWait();
+
+        // Reset engine state before new analysis to prevent SIGSEGV from stale TT entries.
+        // Only send ucinewgame when we actually stopped a previous search, to avoid
+        // unnecessary engine overhead on the common first-call path.
+        //
+        // During a sequential full-game pass this is suppressed: each ply issues
+        // back-to-back searches, so ucinewgame fired every ply and wiped the
+        // transposition table between positions that differ by a single move.
+        // Keeping the TT lets the engine reuse that work.
+        if (wasStopped && !isBatchAnalysis) {
+          _sendCommandDirect('ucinewgame');
+        }
+
+        // Set MultiPV for multiple lines
+        _sendCommand('setoption name MultiPv value $multiPv');
+
+        final completer = analysisCompleter;
+        final lines = <EngineLine>[];
+        int? mainEvaluation;
+        int? mateIn;
+
+        // Per-depth accumulation so the final result can be taken from the
+        // deepest COMPLETED iteration rather than whatever was mid-flight when
+        // `bestmove` arrived. Keyed by depth, then by MultiPV rank.
+        final linesByDepth = <int, Map<int, EngineLine>>{};
+        final evalByDepth = <int, int?>{};
+        final mateByDepth = <int, int?>{};
+
+        subscription = _outputController.stream.listen((line) {
+          if (searchId != _activeSearchId) {
+            subscription?.cancel();
+            return;
+          }
+
+          final trimmedLine = line.trim();
+
+          if (trimmedLine.startsWith('info') && trimmedLine.contains('pv')) {
+            final pvMatch = _multiPvRegex.firstMatch(trimmedLine);
+            final depthMatch = _depthRegex.firstMatch(trimmedLine);
+            final scoreMatch = _scoreCpRegex.firstMatch(trimmedLine);
+            final mateMatch = _scoreMateRegex.firstMatch(trimmedLine);
+            final pvMovesMatch = _pvMovesRegex.firstMatch(trimmedLine);
+
+            if (pvMovesMatch != null) {
+              final pvNumber =
+                  pvMatch != null ? int.parse(pvMatch.group(1)!) : 1;
+              final currentDepth =
+                  depthMatch != null ? int.parse(depthMatch.group(1)!) : 0;
+              int? eval;
+              int? mate;
+
+              if (scoreMatch != null) {
+                eval = _toWhiteRelative(int.parse(scoreMatch.group(1)!), fen);
+              }
+              if (mateMatch != null) {
+                mate = mateToWhiteRelative(int.parse(mateMatch.group(1)!), fen);
+              }
+
+              final moves = pvMovesMatch.group(1)!.split(' ');
+
+              // Convert mate score to centipawns for consistent handling.
+              // Mate in N → large centipawn value so classifyMate() works.
+              // White-relative: positive = white mates, negative = black mates.
+              int? effectiveEval = eval;
+              if (mate != null) {
+                // Mate in N moves: use a large value that decreases as mate gets farther.
+                // 10000 - mate*10 ensures mate-in-1 >> mate-in-2 >> ... >> best non-mate.
+                effectiveEval =
+                    mate > 0 ? (10000 - mate * 10) : (-10000 + mate.abs() * 10);
+              }
+
+              final engineLine = EngineLine(
+                rank: pvNumber,
+                evaluation: (effectiveEval ?? 0) / 100.0,
+                depth: currentDepth,
+                moves: moves,
+                isMate: mate != null,
+                mateIn: mate,
+              );
+
+              // ── Deterministic result capture ──
+              // Stockfish emits a full set of MultiPV lines for depth 1, then 2,
+              // and so on. Overwriting a single flat list meant the captured
+              // result depended on exactly which iteration was in flight when
+              // `bestmove` arrived — the same position could resolve at a
+              // different depth, or with lines from two different depths mixed,
+              // on every run. Group lines by the depth that produced them and
+              // only publish a completed iteration (see `bestmove` below).
+              final bucket = linesByDepth.putIfAbsent(currentDepth, () => {});
+              bucket[pvNumber] = engineLine;
+
+              if (pvNumber == 1) {
+                evalByDepth[currentDepth] = effectiveEval;
+                mateByDepth[currentDepth] = mate;
+
+                // Progressive UI updates may use the in-flight iteration; only
+                // the final committed result has to be deterministic.
+                mainEvaluation = effectiveEval;
+                mateIn = mate;
+              }
+
+              // Keep the live view in sync for onUpdate consumers.
+              if (lines.length >= pvNumber) {
+                lines[pvNumber - 1] = engineLine;
+              } else {
+                lines.add(engineLine);
+              }
+
+              if (onUpdate != null && mainEvaluation != null) {
+                onUpdate(
+                  AnalysisResult(
+                    evaluation: mainEvaluation!,
+                    mateIn: mateIn,
+                    lines: List.from(lines),
+                    depth: currentDepth,
+                  ),
+                );
+              }
+            }
+          }
+
+          if (trimmedLine.startsWith('bestmove')) {
+            subscription?.cancel();
+            // Reset MultiPV to 1
+            _sendCommand('setoption name MultiPV value 1');
+
+            if (!completer.isCompleted) {
+              // Publish the deepest iteration that produced a COMPLETE set of
+              // MultiPV lines. A partially-emitted deeper iteration is discarded,
+              // so the same position always resolves to the same eval instead of
+              // depending on when `bestmove` happened to interrupt the search.
+              int? bestDepth;
+              for (final entry in linesByDepth.entries) {
+                final complete = entry.value.length >= multiPv;
+                if (!complete) continue;
+                if (bestDepth == null || entry.key > bestDepth) {
+                  bestDepth = entry.key;
+                }
+              }
+              // If no iteration completed (very short search), fall back to the
+              // deepest partial one so a result is still returned.
+              bestDepth ??=
+                  linesByDepth.keys.isEmpty
+                      ? null
+                      : linesByDepth.keys.reduce((a, b) => a > b ? a : b);
+
+              final committedLines =
+                  bestDepth == null
+                      ? lines
+                      : (linesByDepth[bestDepth]!.entries.toList()
+                            ..sort((a, b) => a.key.compareTo(b.key)))
+                          .map((e) => e.value)
+                          .toList();
+
+              completer.complete(
+                AnalysisResult(
+                  evaluation:
+                      bestDepth == null
+                          ? (mainEvaluation ?? 0)
+                          : (evalByDepth[bestDepth] ?? mainEvaluation ?? 0),
+                  mateIn: bestDepth == null ? mateIn : mateByDepth[bestDepth],
+                  lines: committedLines,
+                  depth: bestDepth ?? depth,
+                ),
+              );
+            }
+          }
+        });
+
+        // Ensure engine is at max strength for analysis (after stop, before position)
+        if (!_useFallback) {
+          setMaxStrength();
+        }
+
+        // Set position and analyze
+        _sendCommand(
+          buildPositionCommand(
+            fen: fen,
+            startingFen: startingFen,
+            moves: moves,
+          ),
+        );
+
+        // Wait for engine to confirm position is processed before starting search
+        final positionReady = await _waitForReadyOk(
+          timeout: const Duration(milliseconds: 500),
+        );
+        if (!positionReady) {
+          debugPrint(
+            'Position ready timeout for analysis FEN: $fen. Using fallback.',
+          );
+          return BasicEvaluatorService.instance.analyze(fen);
+        }
+
+        _searchInFlight = true;
+        // Node-bounded search caps total work regardless of device speed.
+        // (Reproducibility comes from the completed-iteration capture in the
+        // bestmove handler, not from the search bound itself.)
+        _sendCommand(nodes != null ? 'go nodes $nodes' : 'go depth $depth');
+        final searchStarted = DateTime.now();
+
+        final searchResult = await completer.future.timeout(
+          analysisTimeoutForTesting, // Short timeout for analysis to switch to basic if stuck
+          onTimeout: () {
+            debugPrint(
+              'ENGINE RECOVERY → Analysis timeout for FEN: $fen, using fallback',
+            );
+            _sendCommand('stop');
+            _sendCommand('setoption name MultiPV value 1');
+            // Don't kill isolate or enable permanent fallback — engine may recover
+            return BasicEvaluatorService.instance.analyze(fen);
+          },
+        );
+
+        // Overhead accounting: how much of this call was actual searching versus
+        // the surrounding stop/position/isready/MultiPV round trips.
+        final searchMs =
+            DateTime.now().difference(searchStarted).inMilliseconds;
+        final totalMs = DateTime.now().difference(callStarted).inMilliseconds;
+        debugPrint(
+          '⏱️ SEARCH totalMs=$totalMs searchMs=$searchMs '
+          'overheadMs=${totalMs - searchMs}',
+        );
+
+        return searchResult;
+      } finally {
+        subscription?.cancel();
+        _searchInFlight = false;
+        _isEngineBusy = false;
+        if (_pendingAnalysisFen == fen) {
+          _pendingAnalysis = null;
+          _pendingAnalysisFen = null;
+        }
+      }
+    });
   }
 
   /// Set the engine skill level (affects playing strength).
@@ -1203,15 +1343,21 @@ class StockfishService {
     if (_isDisposed || _useFallback) return;
 
     final clampedElo = elo.clamp(1320, 3190);
-    _sendCommand('setoption name UCI_LimitStrength value true');
-    _sendCommand('setoption name UCI_Elo value $clampedElo');
-    debugPrint('ENGINE CONFIG: UCI_Elo=$clampedElo (requested=$elo)');
+    _executionQueue.run(() async {
+      if (_isDisposed || _useFallback) return;
+      _sendCommand('setoption name UCI_LimitStrength value true');
+      _sendCommand('setoption name UCI_Elo value $clampedElo');
+      debugPrint('ENGINE CONFIG: UCI_Elo=$clampedElo (requested=$elo)');
+    });
   }
 
   /// Set the engine to maximum strength
   void setMaxStrength() {
     if (_isDisposed || _useFallback) return;
-    _sendCommand('setoption name UCI_LimitStrength value false');
+    _executionQueue.run(() async {
+      if (_isDisposed || _useFallback) return;
+      _sendCommand('setoption name UCI_LimitStrength value false');
+    });
   }
 
   /// Threads/Hash used for live play. Chosen for stability and low memory
@@ -1249,25 +1395,31 @@ class StockfishService {
   /// numbers. Used by the config sweep harness for measurement.
   void setAnalysisStrength({int? threadsOverride, int? hashMbOverride}) {
     if (_isDisposed || _useFallback) return;
-    final threads = threadsOverride ?? _analysisThreads;
-    final hash = hashMbOverride ?? analysisHashMb;
-    _sendCommand('setoption name Threads value $threads');
-    _sendCommand('setoption name Hash value $hash');
-    debugPrint(
-      'ENGINE CONFIG: batch analysis Threads=$threads Hash=${hash}MB '
-      '(cores=${Platform.numberOfProcessors})',
-    );
+    _executionQueue.run(() async {
+      if (_isDisposed || _useFallback) return;
+      final threads = threadsOverride ?? _analysisThreads;
+      final hash = hashMbOverride ?? analysisHashMb;
+      _sendCommand('setoption name Threads value $threads');
+      _sendCommand('setoption name Hash value $hash');
+      debugPrint(
+        'ENGINE CONFIG: batch analysis Threads=$threads Hash=${hash}MB '
+        '(cores=${Platform.numberOfProcessors})',
+      );
+    });
   }
 
   /// Restore the live-play Threads/Hash configuration.
   void setLivePlayStrength() {
     if (_isDisposed || _useFallback) return;
-    _sendCommand('setoption name Threads value $livePlayThreads');
-    _sendCommand('setoption name Hash value $livePlayHashMb');
-    debugPrint(
-      'ENGINE CONFIG: live play Threads=$livePlayThreads '
-      'Hash=${livePlayHashMb}MB',
-    );
+    _executionQueue.run(() async {
+      if (_isDisposed || _useFallback) return;
+      _sendCommand('setoption name Threads value $livePlayThreads');
+      _sendCommand('setoption name Hash value $livePlayHashMb');
+      debugPrint(
+        'ENGINE CONFIG: live play Threads=$livePlayThreads '
+        'Hash=${livePlayHashMb}MB',
+      );
+    });
   }
 
   /// Stop any ongoing analysis
@@ -1304,7 +1456,10 @@ class StockfishService {
   /// Start a new game
   void newGame() {
     if (_isDisposed || _useFallback) return;
-    _sendCommand('ucinewgame');
+    _executionQueue.run(() async {
+      if (_isDisposed || _useFallback) return;
+      _sendCommand('ucinewgame');
+    });
   }
 
   /// Dispose the engine, killing the isolate and freeing resources.
@@ -1374,7 +1529,8 @@ class StockfishService {
             _outputController.add(line);
             if (line.contains('readyok')) {
               _isReady = true;
-              _consecutiveCrashes = 0; // Reset crash counter on successful ready
+              _consecutiveCrashes =
+                  0; // Reset crash counter on successful ready
               statusNotifier.value = EngineStatus.ready;
               // Process any queued commands now that engine is fully initialized
               _processCommandQueue();

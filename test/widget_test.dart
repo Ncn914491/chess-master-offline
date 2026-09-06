@@ -241,13 +241,23 @@ class MockStockfishService implements StockfishService {
   bool get isEngineBusyForTesting => false;
 
   @override
-  void setReadyForTesting({bool immediateReadyOk = false, SendPort? commandPort}) {}
+  void setReadyForTesting({
+    bool immediateReadyOk = false,
+    SendPort? commandPort,
+  }) {}
 
   @override
   void emitEngineLineForTesting(String line) {}
 
   @override
   bool isValidFenForTesting(String fen) => true;
+
+  @override
+  bool areMovesLegalForTesting(
+    String fen,
+    String? startingFen,
+    List<String>? moves,
+  ) => true;
 
   @override
   int mateToWhiteRelative(int rawMate, String fen) => rawMate;
